@@ -1,0 +1,11 @@
+build_tool
+collect_data/episode_records
+*.tfrecords
+__pycache__
+tf_log
+model_record
+*.json
+episode_log
+for_fun_imgs
+train_gen_img
+model
