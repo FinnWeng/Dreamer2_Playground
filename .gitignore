@@ -9,3 +9,4 @@ episode_log
 for_fun_imgs
 train_gen_img
 model
+test_sample_gradient.py

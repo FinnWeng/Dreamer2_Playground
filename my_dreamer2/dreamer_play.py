@@ -48,8 +48,24 @@ class Play:
         # since it casuse error when random choice zero object in self.load_dataset
         self.collect(using_random_policy=False, must_be_whole_episode=True)
         self._dataset = utils.slices_dataset_generator(self.datadir, self._c)
+        print("inspect initial episode!!!!")
 
-    def act_repeat(self, env, act,rendering = False):
+        # for i in range(500):
+
+        #     data =  self._dataset()
+        #     for j in range(50):
+        #         k = 5
+        #         # for k in range(10):
+        #         obs = (data["obs"][j,k,:,:,:]+0.5)*255
+        #         print(i,j,k)
+
+        #         # print('data["obs"].shape:',obs.shape) # (50, 10, 64, 64, 3)
+        #         cv2.imshow("obs", obs)
+        #         cv2.waitKey(1)
+
+        #     # cv2.destroyAllWindows()
+
+    def act_repeat(self, env, act, rendering=False):
         collect_reward = 0
         for _ in range(self.act_repeat_time):
             ob, reward, done, info = self.env.step(act)
@@ -123,8 +139,6 @@ class Play:
                 dones.append(float(done))
 
             return np.array(obs), np.array(rewards), np.array(dones)
-
-
 
     def collect(self, using_random_policy=False, must_be_whole_episode=True):
         """
@@ -320,8 +334,6 @@ class Play:
     def post_process_play_records(self):
         self.play_records = []
 
-
-
     def dreaming_update(self):
         """
         using collect function
@@ -370,7 +382,7 @@ class Play:
         # print("obp1s:", obs.shape)  # (50, 10, 160, 160, 1)
         # print("rewards:", rewards.shape)  # (50, 10)
         # print("dones:", rewards.shape)  # (50, 10)
-        # print("discounts:", discounts.shape)
+        # print("discounts:", discounts.shape)  # (50, 10)
 
         start_time = time.time()
         rewards_mean = None
@@ -383,7 +395,6 @@ class Play:
 
         self.post_process_play_records()
         return rewards_mean
-
 
     def play_for_fun(self, using_random_policy=False, must_be_whole_episode=True):
         """
@@ -454,10 +465,10 @@ class Play:
             #     self.RGB_array_list = []
             #     self.save_play_img = False
 
-            ob, reward, done, info = self.act_repeat(self.env, argmax_act[0],rendering=True)
+            ob, reward, done, info = self.act_repeat(
+                self.env, argmax_act[0], rendering=True
+            )
             self.total_step += 1
-
-
 
             self.ob = ob
 
@@ -484,5 +495,3 @@ class Play:
                 # for dreamer, it need to reset state at end of every episode
                 self.model.reset()
                 break
-
-        

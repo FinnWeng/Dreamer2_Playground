@@ -18,6 +18,7 @@ def world_model_imagine(fn, state_dict, action_array):
     current_state = state_dict
     output_dict = {}
     for i in range(action_array.shape[1]):  # to horizon
+
         current_state = fn(current_state, action_array[:, i, :])
         state_dict_list.append(current_state)
     for k, v in state_dict.items():
@@ -254,11 +255,17 @@ class RSSM(tf.keras.Model):
         return self._modules[name]
 
     def initial(self, batch_size):
+        # dtype = tf.float32
+        # return dict(
+        #     mean=tf.zeros([batch_size, self._stoch_size], dtype),
+        #     std=tf.zeros([batch_size, self._stoch_size], dtype),
+        #     stoch=tf.zeros([batch_size, self._stoch_size], dtype),
+        #     deter=self._cell.get_initial_state(None, batch_size, dtype),
+        # )  # zero initialization, float32
         dtype = tf.float32
         return dict(
-            mean=tf.zeros([batch_size, self._stoch_size], dtype),
-            std=tf.zeros([batch_size, self._stoch_size], dtype),
-            stoch=tf.zeros([batch_size, self._stoch_size], dtype),
+            prob_vector=tf.zeros([batch_size, 32, self._stoch_size], dtype),
+            stoch=tf.zeros([batch_size, 32 * self._stoch_size], dtype),
             deter=self._cell.get_initial_state(None, batch_size, dtype),
         )  # zero initialization, float32
 
@@ -271,8 +278,16 @@ class RSSM(tf.keras.Model):
         """
         return tf.concat([state["stoch"], state["deter"]], -1)
 
-    def get_dist(self, state):
-        return tfd.MultivariateNormalDiag(state["mean"], state["std"])
+    def get_dist(self, state, stop_grad=False):
+        """
+        # def get_dist(self, state):
+        #     return tfd.MultivariateNormalDiag(state["mean"], state["std"])
+        """
+        if stop_grad:
+            return tfd.OneHotCategorical(tf.stop_gradient(state["prob_vector"]))
+
+        else:
+            return tfd.OneHotCategorical(state["prob_vector"])
 
     @tf.function
     def img_step(self, prev_state, prev_action):
@@ -281,7 +296,8 @@ class RSSM(tf.keras.Model):
         p(st|st-1,at-1)
         """
         # the image step from St-1 to St (be aware that this is not OBSERVATION)
-        print()
+        # print('prev_state["stoch"]:', prev_state["stoch"].shape)  # (500, 960)
+        # print("prev_action:", prev_action.shape)  # (500, 4)
         x = tf.concat([prev_state["stoch"], prev_action], -1)  # => (25, 34)
         x = self.get(
             "img1", tf.keras.layers.Dense, self._hidden_size, self._activation
@@ -297,23 +313,40 @@ class RSSM(tf.keras.Model):
         x = self.get(
             "img2", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
-        x = self.get("img3", tf.keras.layers.Dense, 2 * self._stoch_size, None)(
+        x = self.get("img3", tf.keras.layers.Dense, 32 * self._stoch_size, None)(
             x
-        )  # =>(25, 60)
+        )  # =>(25, 32* _stoch_size)
+        x = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
 
-        mean, std = tf.split(
-            x, 2, -1
-        )  # =>(25, 30), =>(25, 30) or =>(1250, 30), =>(1250, 30), the 1250 is 25*50 since the flatten function of imagine head
-        std = tf.nn.softplus(std) + 0.1
-        stoch = self.get_dist({"mean": mean, "std": std}).sample()
-        print("stoch:", stoch.shape)  # (25, 30)
+        # mean, std = tf.split(
+        #     x, 2, -1
+        # )  # =>(25, 30), =>(25, 30) or =>(1250, 30), =>(1250, 30), the 1250 is 25*50 since the flatten function of imagine head
+        # std = tf.nn.softplus(std) + 0.1
+        # stoch = self.get_dist({"mean": mean, "std": std}).sample()
+        # prior = {"mean": mean, "std": std, "stoch": stoch, "deter": deter}
+
+        prob_vector = tf.keras.layers.Softmax()(
+            x
+        )  # (25, 32,  _stoch_size), which means 32 distinct categorical distibution
+
+        stoch = tf.cast(
+            self.get_dist({"prob_vector": prob_vector}).sample(), tf.float32
+        )
+        print("stoch:", stoch.shape)  # (25, 32 , _stoch_size), one hot vectors
+
+        """
+        Straight-Through Gradients trick
+        """
+        stoch = stoch + prob_vector - tf.stop_gradient(prob_vector)
+
+        stoch = tf.keras.layers.Flatten()(stoch)  # # (25, 32*_stoch_size)
 
         """
         deter is purely from neural network, which is deterministic.
         stoch is sample from distribution decided by deter, which is stochastic.
         """
 
-        prior = {"mean": mean, "std": std, "stoch": stoch, "deter": deter}
+        prior = {"prob_vector": prob_vector, "stoch": stoch, "deter": deter}
         return prior
 
     @tf.function
@@ -329,11 +362,22 @@ class RSSM(tf.keras.Model):
         x = self.get(
             "obs1", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
-        x = self.get("obs2", tf.keras.layers.Dense, 2 * self._stoch_size, None)(x)
-        mean, std = tf.split(x, 2, -1)
-        std = tf.nn.softplus(std) + 0.1
-        stoch = self.get_dist({"mean": mean, "std": std}).sample()
-        post = {"mean": mean, "std": std, "stoch": stoch, "deter": prior["deter"]}
+        x = self.get("obs2", tf.keras.layers.Dense, 32 * self._stoch_size, None)(x)
+        x = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
+        prob_vector = tf.keras.layers.Softmax()(
+            x
+        )  # (25, 32,  _stoch_size), which means 32 distinct categorical distibution
+
+        stoch = tf.cast(
+            self.get_dist({"prob_vector": prob_vector}).sample(), tf.float32
+        )
+        """
+        Straight-Through Gradients trick
+        """
+        stoch = stoch + prob_vector - tf.stop_gradient(prob_vector)
+        stoch = tf.keras.layers.Flatten()(stoch)  # # (25, 32*_stoch_size)
+
+        post = {"prob_vector": prob_vector, "stoch": stoch, "deter": prior["deter"]}
         return post, prior
 
     @tf.function
@@ -405,6 +449,11 @@ class Dreamer:
         self.lr = 1e-5
         self.gamma = 0.99
         self.tau = 0.001
+        self.eta_x = 1 / (64 * 64 * 3)
+        self.eta_r = 1
+        self.eta_gamma = 1
+        self.eta_t = 0.08
+        self.eta_q = 0.02
 
         self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
         self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
@@ -459,24 +508,23 @@ class Dreamer:
 
         self.RGB_array_list = []
 
-        model_list = [self.dynamics,self.encoder,self.reward_decoder, self.critic, self.actor]
-        model_ckpt_path_list = [self.Dreamer_dynamics_path,self.Dreamer_encoder_path,self.Dreamer_reward_decoder_path,self.Dreamer_critic_path, self.Dreamer_actor_path]
+        # model_list = [self.dynamics,self.encoder,self.reward_decoder, self.critic, self.actor]
+        # model_ckpt_path_list = [self.Dreamer_dynamics_path,self.Dreamer_encoder_path,self.Dreamer_reward_decoder_path,self.Dreamer_critic_path, self.Dreamer_actor_path]
 
-        if not is_training:
-            self.dynamics.load_weights(self.Dreamer_dynamics_path)
-            self.encoder.load_weights(self.Dreamer_encoder_path)
-            # self.decoder
-            # self.reward_decoder.load_weights(self.Dreamer_reward_decoder_path)
-            # self.critic.load_weights(self.Dreamer_critic_path)
-            self.actor.load_weights(self.Dreamer_actor_path)
+        # if not is_training:
+        #     self.dynamics.load_weights(self.Dreamer_dynamics_path)
+        #     self.encoder.load_weights(self.Dreamer_encoder_path)
+        #     # self.decoder
+        #     # self.reward_decoder.load_weights(self.Dreamer_reward_decoder_path)
+        #     # self.critic.load_weights(self.Dreamer_critic_path)
+        #     self.actor.load_weights(self.Dreamer_actor_path)
 
-            # self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
-            # self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
-            # self.Dreamer_reward_decoder_path = "./model/Dreamer_reward_decoder.ckpt"
-            # self.Dreamer_critic_path = "./model/Dreamer_critic.ckpt"
-            # self.Dreamer_actor_path = "./model/Dreamer_actor.ckpt"
-        if not is_training:
-
+        #     # self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
+        #     # self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
+        #     # self.Dreamer_reward_decoder_path = "./model/Dreamer_reward_decoder.ckpt"
+        #     # self.Dreamer_critic_path = "./model/Dreamer_critic.ckpt"
+        #     # self.Dreamer_actor_path = "./model/Dreamer_actor.ckpt"
+        # if not is_training:
 
     def reset(self):
         # this reset the state saved for RSSM forwarding
@@ -695,6 +743,10 @@ class Dreamer:
             the world model, which is _dynamics(RSSM)
             """
             embed = self.encoder(obp1s)  # (25, 50, 1024)
+            """
+            Below are for make "post", which is posterior of VAE/VQVAE
+            Could it just come from self.encoder(obp1s) + action???
+            """
             post, prior = self.dynamics.observe(
                 embed, actions
             )  # world model try to dream from first step to last step. each value of post dict is (25, batch_length,30)
@@ -708,9 +760,20 @@ class Dreamer:
             )  # reward_pred.sample(): (25, batch_length)
 
             likes = {}
-            likes["images_prob"] = tf.reduce_mean(image_pred.log_prob(obp1s))
+            # print("obp1s:", obp1s.shape)
+            # print(
+            #     "image_pred.log_prob(obp1s):", image_pred.log_prob(obp1s).shape
+            # )  # 50, 10
+            # print(
+            #     "image_pred:", image_pred.batch_shape, image_pred.event_shape
+            # )  # (50, 10) (64, 64, 3)
+            likes["images_prob"] = self.eta_x * tf.reduce_mean(
+                image_pred.log_prob(obp1s)
+            )
             # print("rewards")
-            likes["rewards_prob"] = tf.reduce_mean(reward_pred.log_prob(rewards))
+            likes["rewards_prob"] = self.eta_r * tf.reduce_mean(
+                reward_pred.log_prob(rewards)
+            )
             if (
                 self._c.pcont
             ):  # for my aspect, this will make model to learn which step to focus by itself.
@@ -718,19 +781,32 @@ class Dreamer:
                 pcont_target = (
                     self._c.discount * record_discounts
                 )  # all 1* discount except the done which will be 0. Explicitly make it to learn what is done state.
-                likes["pcont_prob"] = tf.reduce_mean(pcont_pred.log_prob(pcont_target))
+                likes["pcont_prob"] = tf.reduce_mean(
+                    pcont_pred.log_prob(pcont_target)
+                )  # shape = (50,10)
                 likes["pcont_prob"] *= self._c.pcont_scale
 
             prior_dist = self.dynamics.get_dist(prior)
+            stop_prior_dist = self.dynamics.get_dist(prior, stop_grad=True)
             post_dist = self.dynamics.get_dist(post)
+            stop_post_dist = self.dynamics.get_dist(post, stop_grad=True)
 
-            div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
-            div = tf.maximum(div, self._c.free_nats)
+            # div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
+            # div = tf.maximum(div, self._c.free_nats)
+
+            kl_blancing_div = self.eta_t * tf.reduce_mean(
+                tfd.kl_divergence(stop_post_dist, prior_dist)
+            ) + self.eta_q * tf.reduce_mean(
+                tfd.kl_divergence(post_dist, stop_prior_dist)
+            )
 
             """
             the model loss is exactly the VAE loss of world model(which is VAE sample generator)
             """
-            world_loss = self._c.kl_scale * div - sum(
+            # world_loss = self._c.kl_scale * div - sum(
+            #     likes.values()
+            # )  # like.value contains log prob of image and reward
+            world_loss = self._c.kl_scale * kl_blancing_div - sum(
                 likes.values()
             )  # like.value contains log prob of image and reward
 
