@@ -63,8 +63,12 @@ class Gym_Wrapper:
 
         return ob, reward, done, _
 
+    # def render(self, mode="rgb_array"):
+    #     return self._env.render(mode)
+    
     def render(self, mode="rgb_array"):
-        return self._env.render(mode)
+        return self._env.render()
+    
 
 
 if __name__ == "__main__":

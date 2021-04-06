@@ -15,8 +15,11 @@ class Play:
         self.model = model_maker(self.env, training, config)
         self._c = config
         self.env.reset()
+        # self.ob, _, _, _ = self.env.step(
+        #     [0]
+        # )  # whether it is discrete or not, 0 is proper
         self.ob, _, _, _ = self.env.step(
-            [0]
+            self.env._env.action_space.sample()
         )  # whether it is discrete or not, 0 is proper
         # self.batch_size = 16
         self.batch_size = self._c.batch_size
@@ -69,11 +72,19 @@ class Play:
         collect_reward = 0
         for _ in range(self.act_repeat_time):
             ob, reward, done, info = self.env.step(act)
-            if rendering:
-                self.env.render()
+            # if rendering:
+            #     self.env.render(mode='human')
+                # rgb_array = self.env.render()
+                # rgb_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+                # cv2.imshow("gameplay", rgb_array) 
+                # cv2.waitKey(1)
+                # if done:
+                #     cv2.destroyAllWindows()
             collect_reward += reward
             if done:
                 break
+        if rendering:
+            rgb_array = self.env.render()
 
         return ob, collect_reward, done, info
 
@@ -248,7 +259,7 @@ class Play:
                 print("game done!!")
                 self.env.reset()
                 self.ob, _, _, _ = self.env.step(
-                    [0]
+                    self.env._env.action_space.sample()
                 )  # whether it is discrete or not, 0 is proper
 
                 average_reward = self.episode_reward / self.episode_step
@@ -421,6 +432,26 @@ class Play:
         first, episode is done; second, the buffer is full(>self.batch_size * self.batch_length*self.TD_size).
         """
         # while len(episode_record) < self.batch_size * self.batch_length * self.TD_size:
+
+        # build model by call method
+        init_obs = utils.preprocess(
+                {
+                    "obs": np.array([self.ob]),
+                    "obp1s": np.array([self.ob]),
+                    "rewards": 0,
+                },
+                self._c,
+            )[
+                "obs"
+            ]  # obp1s is for redundant here
+
+        act = self.model.policy(init_obs, training=False)[
+            0
+        ].numpy()  # to get batch dim,
+        self.model.load_model_weights()
+
+
+        
         while True:  # stop only when episoe ends
             # episode = []
             # while True:
@@ -440,9 +471,12 @@ class Play:
                     "obs"
                 ]  # obp1s is for redundant here
 
-                act = self.model.policy(processed_obs, training=False)[
+                # there's no way to let model move, so I use sampling instead of mode.
+                act = self.model.policy(processed_obs, training=True)[
                     0
                 ].numpy()  # to get batch dim,
+                print("act:",act)
+                
 
             if self._c.is_discrete:
                 argmax_act = np.argmax(act, axis=-1)
@@ -465,10 +499,15 @@ class Play:
             #     self.RGB_array_list = []
             #     self.save_play_img = False
 
+            if self.total_step <=1:
+                argmax_act = [1]
+
+
             ob, reward, done, info = self.act_repeat(
                 self.env, argmax_act[0], rendering=True
             )
             self.total_step += 1
+            print("self.total_step:",self.total_step)
 
             self.ob = ob
 

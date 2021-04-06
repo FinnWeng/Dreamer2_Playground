@@ -85,7 +85,7 @@ class ConvEncoder(tf.keras.Model):
         self.l4 = tf.keras.layers.Conv2D(8 * self.filters, kernel_size=4, **kwargs)
         # self.l5 = tf.keras.layers.Conv2D(8 * self.filters, kernel_size=4, **kwargs)
 
-    def __call__(self, obs):
+    def call(self, obs):
         # obs: (batch_size, batch_length, h,w,c)
 
         x = tf.reshape(
@@ -124,7 +124,7 @@ class ConvDecoder(tf.keras.Model):
             self._modules[name] = ctor(*args, **kwargs)
         return self._modules[name]
 
-    def __call__(self, features):
+    def call(self, features):
         kwargs = dict(strides=2, activation=self._act)
         x = self.get("h1", tf.keras.layers.Dense, 32 * self._depth, None)(features)
         x = tf.reshape(x, [-1, 1, 1, 32 * self._depth])
@@ -178,7 +178,7 @@ class ActionDecoder(tf.keras.Model):
             self._modules[name] = ctor(*args, **kwargs)
         return self._modules[name]
 
-    def __call__(self, features):
+    def call(self, features):
         raw_init_std = np.log(np.exp(self._init_std) - 1)
         x = features
         for index in range(self._layers_num):
@@ -219,7 +219,7 @@ class ValueDecoder(tf.keras.Model):
             self._modules[name] = ctor(*args, **kwargs)
         return self._modules[name]
 
-    def __call__(self, features):
+    def call(self, features):
         x = features
         for index in range(self.layers_num):  # 3
             x = self.get(f"h{index}", tf.keras.layers.Dense, self._units, self._act)(x)
@@ -302,6 +302,9 @@ class RSSM(tf.keras.Model):
         x = self.get(
             "img1", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
+        x = self.get(
+            "img2", tf.keras.layers.Dense, self._hidden_size, self._activation
+        )(x)
         x, deter = self._cell(
             x, [prev_state["deter"]]
         )  # (output, next_state) = call(input, state)
@@ -311,9 +314,12 @@ class RSSM(tf.keras.Model):
 
         # below is VAE prior, which means P(z|x)
         x = self.get(
-            "img2", tf.keras.layers.Dense, self._hidden_size, self._activation
+            "img3", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
-        x = self.get("img3", tf.keras.layers.Dense, 32 * self._stoch_size, None)(
+        x = self.get(
+            "img4", tf.keras.layers.Dense, self._hidden_size, self._activation
+        )(x)
+        x = self.get("img5", tf.keras.layers.Dense, 32 * self._stoch_size, None)(
             x
         )  # =>(25, 32* _stoch_size)
         x = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
@@ -362,7 +368,11 @@ class RSSM(tf.keras.Model):
         x = self.get(
             "obs1", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
-        x = self.get("obs2", tf.keras.layers.Dense, 32 * self._stoch_size, None)(x)
+        x = self.get(
+            "obs2", tf.keras.layers.Dense, self._hidden_size, self._activation
+        )(x)
+        x = self.get("obs3", tf.keras.layers.Dense, 32 * self._stoch_size, None)(x)
+        print("x:", x.shape)
         x = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
         prob_vector = tf.keras.layers.Softmax()(
             x
@@ -511,20 +521,34 @@ class Dreamer:
         # model_list = [self.dynamics,self.encoder,self.reward_decoder, self.critic, self.actor]
         # model_ckpt_path_list = [self.Dreamer_dynamics_path,self.Dreamer_encoder_path,self.Dreamer_reward_decoder_path,self.Dreamer_critic_path, self.Dreamer_actor_path]
 
-        # if not is_training:
-        #     self.dynamics.load_weights(self.Dreamer_dynamics_path)
-        #     self.encoder.load_weights(self.Dreamer_encoder_path)
-        #     # self.decoder
-        #     # self.reward_decoder.load_weights(self.Dreamer_reward_decoder_path)
-        #     # self.critic.load_weights(self.Dreamer_critic_path)
-        #     self.actor.load_weights(self.Dreamer_actor_path)
+    
+    def load_model_weights(self):
+        def check_weights_value(list_of_tf_var):
+            count = 0.0
+            for var in list_of_tf_var:
+                count += np.sum(var)
+            return count
 
-        #     # self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
-        #     # self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
-        #     # self.Dreamer_reward_decoder_path = "./model/Dreamer_reward_decoder.ckpt"
-        #     # self.Dreamer_critic_path = "./model/Dreamer_critic.ckpt"
-        #     # self.Dreamer_actor_path = "./model/Dreamer_actor.ckpt"
-        # if not is_training:
+        
+        self.dynamics.load_weights(self.Dreamer_dynamics_path)
+        print("self.encoder.trainable_variables:",check_weights_value(self.encoder.trainable_variables))
+        self.encoder.load_weights(self.Dreamer_encoder_path)
+        print("self.encoder.trainable_variables:",check_weights_value(self.encoder.trainable_variables))
+        # self.reward_decoder.load_weights(self.Dreamer_reward_decoder_path)
+        # self.critic.load_weights(self.Dreamer_critic_path)
+
+
+        print("self.actor.trainable_variables:",check_weights_value(self.actor.trainable_variables))
+        self.actor.load_weights(self.Dreamer_actor_path)
+        print("self.actor.trainable_variables:",check_weights_value(self.actor.trainable_variables))
+        
+
+        # self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
+        # self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
+        # self.Dreamer_reward_decoder_path = "./model/Dreamer_reward_decoder.ckpt"
+        # self.Dreamer_critic_path = "./model/Dreamer_critic.ckpt"
+        # self.Dreamer_actor_path = "./model/Dreamer_actor.ckpt"
+    # if not is_training:
 
     def reset(self):
         # this reset the state saved for RSSM forwarding
@@ -862,6 +886,35 @@ class Dreamer:
         critic_var.extend(self.critic.trainable_variables)
         critic_grads = critic_tape.gradient(critic_loss, critic_var)
 
+        # def get_parameters(list_of_tf_var):
+        #     count = 0
+        #     for var in list_of_tf_var:
+        #         count += np.prod(np.array(var.shape))
+        #     return count
+
+        # print(
+        #     "self.encoder.trainable_variables:",
+        #     get_parameters(self.encoder.trainable_variables),
+        # )
+        # print(
+        #     "self.decoder.trainable_variables:",
+        #     get_parameters(self.decoder.trainable_variables),
+        # )
+        # print(
+        #     "self.dynamics.trainable_variables:",
+        #     get_parameters(self.dynamics.trainable_variables),
+        # )
+
+        # print(
+        #     "self.actor.trainable_variables:",
+        #     get_parameters(self.actor.trainable_variables),
+        # )
+
+        # print(
+        #     "self.actor.trainable_variables:",
+        #     get_parameters(self.critic.trainable_variables),
+        # )
+
         self.world_optimizer.apply_gradients(zip(world_grads, world_var))
         self.critic_optimizer.apply_gradients(zip(critic_grads, critic_var))
         self.actor_optimizer.apply_gradients(zip(actor_grads, actor_var))
@@ -893,6 +946,7 @@ class Dreamer:
                 embed,
                 image_pred,
             )
+        # print("self.dynamics:", self.dynamics.summary())
 
     def _image_summaries(self, data, embed, image_pred):
         # print("data['obs']:", data["obs"].shape) #  (50, 10, 64, 64, 1)

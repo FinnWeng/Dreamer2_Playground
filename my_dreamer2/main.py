@@ -35,13 +35,13 @@ def define_config():
     config.envs = 1
     config.parallel = "none"
     config.action_repeat = 2
-    config.time_limit = 1000
-    config.prefill = 5000
+    config.time_limit = 108000
+    config.prefill = 50000
     config.eval_noise = 0.0
     config.clip_rewards = "none"
     # Model.
-    config.deter_size = 200
-    config.stoch_size = 30
+    config.deter_size = 800
+    config.stoch_size = 32
     config.num_units = 400
     config.dense_act = "elu"
     config.cnn_act = "relu"
