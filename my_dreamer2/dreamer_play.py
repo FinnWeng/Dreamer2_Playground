@@ -42,6 +42,7 @@ class Play:
         if training:
             self.prefill_and_make_dataset()
 
+
     # def prefill_and_make_dataset(self):
     #     # since it casuse error when random choice zero object in self.load_dataset
     #     self.collect(using_random_policy=False, must_be_whole_episode=True)
@@ -50,7 +51,7 @@ class Play:
     def prefill_and_make_dataset(self):
         # since it casuse error when random choice zero object in self.load_dataset
         self.collect(using_random_policy=False, must_be_whole_episode=True)
-        self._dataset = utils.slices_dataset_generator(self.datadir, self._c)
+        self._dataset = iter(utils.load_dataset(self.datadir, self._c))
         print("inspect initial episode!!!!")
 
         # for i in range(500):
@@ -374,10 +375,10 @@ class Play:
 
         4. in each batch process, after imagine step, do update actor and critic
         """
-        # data = next(self._dataset)  # already do preprocess in dataset making
-        data = (
-            self._dataset()
-        )  # already do preprocess in dataset making, using handmade dataset generator
+        data = next(self._dataset)  # already do preprocess in dataset making
+        # data = (
+        #     self._dataset()
+        # )  # already do preprocess in dataset making, using handmade dataset generator
 
         obs, actions, obp1s, rewards, dones, discounts = (
             data["obs"],

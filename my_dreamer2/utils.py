@@ -67,9 +67,10 @@ def load_episodes(directory, rescan, length=None, balance=False, seed=0):
     random = np.random.RandomState(seed)
     cache = {}  # len 33
     # start_time = time.time()
+
     while True:
         for filename in directory.glob("*.npz"):
-            # print("filename:", filename)
+            
             if filename not in cache:
                 try:
                     with filename.open("rb") as f:
@@ -88,33 +89,12 @@ def load_episodes(directory, rescan, length=None, balance=False, seed=0):
                     continue
                 cache[filename] = episode
         keys = list(cache.keys())  # which means each name of episode record in dir
-        # print("keys:", keys)
-        # filename_gen = directory.glob("*.npz")
-        # filename_list = list(filename_gen)
-        # for index in random.choice(len(filename_list), rescan):
-        #     filename = filename_list[index]
-        #     try:
-        #         with filename.open("rb") as f:
-        #             # print("start loading!")
-        #             # print("filename:",f)
-        #             episode = np.load(f)
-        #             # episode = np.load(f,allow_pickle=True)
+        
 
-        #             # print("finish loading!")
 
-        #             episode = {
-        #                 k: episode[k] for k in episode.keys()
-        #             }  # dict_keys(['image', 'action', 'reward', 'discount'])
-
-        #     except Exception as e:
-        #         print(f"Could not load episode: {e}")
-        #         continue
-        #     cache[filename] = episode
-        # keys = list(cache.keys())
-
-        # end_time = time.time()
-        # print("loadtime",end_time - start_time)
-
+        # # for not using generater
+        # episode_list = []
+        # # print("len(keys):",keys)
         # for index in random.choice(len(keys), rescan):
         #     episode = cache[keys[index]]  # {k: list of value}
         #     if length:
@@ -134,16 +114,25 @@ def load_episodes(directory, rescan, length=None, balance=False, seed=0):
 
         #         episode = {k: v[index : index + length] for k, v in episode.items()}
 
-        #     yield episode
+        #     # # # turn into list of dict
+        #     # print("rescan:", rescan)  # 100
+        #     # print("length:", length)  # 10
+        #     # print("episode['obs'].shape():", episode["obs"].shape)  # (10, 64, 64, 3)
+        #     episode_list.append(episode)
+        # episode = {
+        #     k: np.stack([episode[k] for episode in episode_list], 0)
+        #     for k, v in episode_list[0].items()
+        # }
+        # return episode
 
-        # for not using generater
-        episode_list = []
+
         for index in random.choice(len(keys), rescan):
-            episode = cache[keys[index]]  # {k: list of value}
+            episode = cache[keys[index]]
             if length:
                 total = len(next(iter(episode.values())))
 
                 available = total - length
+                
 
                 if available < 1:
                     print(f"Skipped short episode of length {available}.")
@@ -156,28 +145,23 @@ def load_episodes(directory, rescan, length=None, balance=False, seed=0):
                     )  # randomly choose 0~available samples of  batch_length traj
 
                 episode = {k: v[index : index + length] for k, v in episode.items()}
-
-            # # # turn into list of dict
-            # print("rescan:", rescan)  # 100
-            # print("length:", length)  # 10
-            # print("episode['obs'].shape():", episode["obs"].shape)  # (10, 64, 64, 3)
-            episode_list.append(episode)
-        episode = {
-            k: np.stack([episode[k] for episode in episode_list], 0)
-            for k, v in episode_list[0].items()
-        }
-        return episode
+            
+            yield episode
+    
 
 
 def load_dataset(directory, config):  # load data from npz
-    episode = load_episodes(directory, 1)
-    # episode = next(load_episodes(directory, 1))
+    # episode = load_episodes(directory, 1)
+    episode = next(load_episodes(directory, 1))
     types = {k: v.dtype for k, v in episode.items()}
+    
     shapes = {k: (None,) + v.shape[1:] for k, v in episode.items()}
+    print("shapes:",shapes)
 
     generator = lambda: load_episodes(
         directory, config.train_steps, config.batch_length, config.dataset_balance
     )
+    
     dataset = tf.data.Dataset.from_generator(generator, types, shapes)
 
     dataset = dataset.batch(config.batch_size, drop_remainder=True)
