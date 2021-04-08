@@ -459,6 +459,7 @@ class Dreamer:
         self.lr = 1e-5
         self.gamma = 0.99
         self.tau = 0.001
+        self.actor_entropy_loss_scale = 3*1e-3
         self.eta_x = 1 / (64 * 64 * 3)
         self.eta_r = 1
         self.eta_gamma = 1

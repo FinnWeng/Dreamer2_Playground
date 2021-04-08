@@ -41,6 +41,9 @@ class Play:
         # self._dataset = iter(self.load_dataset(self.datadir, self._c))
         if training:
             self.prefill_and_make_dataset()
+        else:
+            self._dataset = iter(utils.load_dataset(self.datadir, self._c))
+
 
 
     # def prefill_and_make_dataset(self):
