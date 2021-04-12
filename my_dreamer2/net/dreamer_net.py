@@ -338,7 +338,7 @@ class RSSM(tf.keras.Model):
         stoch = tf.cast(
             self.get_dist({"prob_vector": prob_vector}).sample(), tf.float32
         )
-        print("stoch:", stoch.shape)  # (25, 32 , _stoch_size), one hot vectors
+        # print("stoch:", stoch.shape)  # (25, 32 , _stoch_size), one hot vectors
 
         """
         Straight-Through Gradients trick
@@ -372,7 +372,7 @@ class RSSM(tf.keras.Model):
             "obs2", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
         x = self.get("obs3", tf.keras.layers.Dense, 32 * self._stoch_size, None)(x)
-        print("x:", x.shape)
+        # print("x:", x.shape)
         x = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
         prob_vector = tf.keras.layers.Softmax()(
             x
@@ -459,12 +459,12 @@ class Dreamer:
         self.lr = 1e-5
         self.gamma = 0.99
         self.tau = 0.001
-        self.actor_entropy_loss_scale = 3*1e-3
-        self.eta_x = 1 / (64 * 64 * 3)
-        self.eta_r = 1
-        self.eta_gamma = 1
-        self.eta_t = 0.08
-        self.eta_q = 0.02
+        self.actor_entropy_loss_scale = 3 * 1e-3
+        self.eta_x = config.eta_x
+        self.eta_r = config.eta_r
+        self.eta_gamma = config.eta_gamma
+        self.eta_t = config.eta_t
+        self.eta_q = config.eta_q
 
         self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
         self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
@@ -485,7 +485,7 @@ class Dreamer:
         self.reward_decoder = ValueDecoder((), 2, self._c.num_units, act=actv)
         if self._c.pcont:
             self._pcont = ValueDecoder((), 3, self._c.num_units, "binary", act=actv)
-            print("self._pcont:", self._pcont.variables)
+            # print("self._pcont:", self._pcont.variables)
         self.critic = ValueDecoder(
             (), 3, self._c.num_units, act=actv
         )  # critic, no advantage
@@ -522,33 +522,45 @@ class Dreamer:
         # model_list = [self.dynamics,self.encoder,self.reward_decoder, self.critic, self.actor]
         # model_ckpt_path_list = [self.Dreamer_dynamics_path,self.Dreamer_encoder_path,self.Dreamer_reward_decoder_path,self.Dreamer_critic_path, self.Dreamer_actor_path]
 
-    
     def load_model_weights(self):
         def check_weights_value(list_of_tf_var):
             count = 0.0
             for var in list_of_tf_var:
-                count += np.sum(var)
+                var_sum = np.sum(var)
+                # print("var.shape:", var.shape)
+                # print("var_sum:", var_sum.shape)
+                count += var_sum
             return count
 
-        
         self.dynamics.load_weights(self.Dreamer_dynamics_path)
-        print("self.encoder.trainable_variables:",check_weights_value(self.encoder.trainable_variables))
+        # print(
+        #     "self.encoder.trainable_variables:",
+        #     check_weights_value(self.encoder.trainable_variables),
+        # )
         self.encoder.load_weights(self.Dreamer_encoder_path)
-        print("self.encoder.trainable_variables:",check_weights_value(self.encoder.trainable_variables))
+        # print(
+        #     "self.encoder.trainable_variables:",
+        #     check_weights_value(self.encoder.trainable_variables),
+        # )
         # self.reward_decoder.load_weights(self.Dreamer_reward_decoder_path)
         # self.critic.load_weights(self.Dreamer_critic_path)
 
-
-        print("self.actor.trainable_variables:",check_weights_value(self.actor.trainable_variables))
+        # print(
+        #     "self.actor.trainable_variables:",
+        #     check_weights_value(self.actor.trainable_variables),
+        # )
         self.actor.load_weights(self.Dreamer_actor_path)
-        print("self.actor.trainable_variables:",check_weights_value(self.actor.trainable_variables))
-        
+        # print(
+        #     "self.actor.trainable_variables:",
+        #     check_weights_value(self.actor.trainable_variables),
+        # )
 
         # self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
         # self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
         # self.Dreamer_reward_decoder_path = "./model/Dreamer_reward_decoder.ckpt"
         # self.Dreamer_critic_path = "./model/Dreamer_critic.ckpt"
         # self.Dreamer_actor_path = "./model/Dreamer_actor.ckpt"
+
     # if not is_training:
 
     def reset(self):
@@ -919,7 +931,7 @@ class Dreamer:
         self.world_optimizer.apply_gradients(zip(world_grads, world_var))
         self.critic_optimizer.apply_gradients(zip(critic_grads, critic_var))
         self.actor_optimizer.apply_gradients(zip(actor_grads, actor_var))
-        if self.total_step % 1000 == 0:
+        if self.total_step % 2000 == 0:
             self.dynamics.save_weights(self.Dreamer_dynamics_path)
             self.encoder.save_weights(self.Dreamer_encoder_path)
             self.reward_decoder.save_weights(self.Dreamer_reward_decoder_path)
@@ -928,8 +940,9 @@ class Dreamer:
 
         self.total_step += 1
         tf.summary.experimental.set_step(self.total_step)
-        print("update finish, save summary...")
+        
         if self.total_step % 20 == 0:
+            print("update finish, save summary..., now update step:",self.total_step)
             with self._writer.as_default():
                 tf.summary.scalar(
                     "actor_loss/reverse_lambda_return", actor_loss, step=self.total_step
@@ -940,7 +953,7 @@ class Dreamer:
                 #     "average_reward", tf.reduce_mean(rewards), step=self.total_step
                 # )
 
-        if self.total_step % 500 == 0:
+        if self.total_step % 2000 == 0:
             print("do image summaries saving!!")
             self._image_summaries(
                 {"obs": obs, "actions": actions, "obp1s": obp1s},

@@ -34,7 +34,7 @@ def define_config():
     config.grayscale = False
     config.envs = 1
     config.parallel = "none"
-    config.action_repeat = 2
+    config.action_repeat = 4
     config.time_limit = 108000
     config.prefill = 50000
     config.eval_noise = 0.0
@@ -45,25 +45,34 @@ def define_config():
     config.num_units = 400
     config.dense_act = "elu"
     config.cnn_act = "relu"
-    config.cnn_depth = 32
+    config.cnn_depth = 48
     #   config.pcont = False
     config.pcont = True
     config.free_nats = 3.0
     config.kl_scale = 1.0
     config.pcont_scale = 1.0
+    config.eta_x = 1 / (64 * 64 * 3)
+    config.eta_r = 1
+    config.eta_gamma = 1
+    config.eta_t = 0.08
+    config.eta_q = 0.02
     config.weight_decay = 0.0
     config.weight_decay_pattern = r".*"
     # Training.
     config.batch_size = 50
 
-    # config.batch_length = 50
-    config.batch_length = 10
-    config.train_every = 1000
+    config.batch_length = 50
+    # config.batch_length = 10
+    config.train_every = 16
     config.train_steps = 100
+    # config.max_dataset_steps = 7 * 1e5
+    config.max_dataset_steps = 1e6
+    config.oversample_ends = True
+
     config.pretrain = 100
-    config.model_lr = 6e-4
-    config.value_lr = 8e-5
-    config.actor_lr = 8e-5
+    config.model_lr = 2e-4
+    config.value_lr = 1e-5
+    config.actor_lr = 4e-5
     config.grad_clip = 100.0
     config.dataset_balance = False
     # Behavior.
@@ -106,7 +115,7 @@ if __name__ == "__main__":
         for single play record, since I adopt act repeat and TD method, so it contain repeat_time*TD_size frames
         """
         print("play_process.play_records:", len(play_process.play_records))
-        play_process.collect(using_random_policy=False, must_be_whole_episode=False)
+        play_process.collect(using_random_policy=False, must_be_whole_episode=False,prefill = False)
         print("play_process.play_records:", len(play_process.play_records))
         mean_reward = play_process.dreaming_update()
         print("rewards:", mean_reward)

@@ -30,6 +30,7 @@ class Play:
         self.play_records = []
         self.act_repeat_time = self._c.action_repeat
         self.advantage = True
+
         self.total_step = 1
         self.exploration_rate = 0.0  # the exploration is in dreamer_net
         self.save_play_img = False
@@ -42,9 +43,9 @@ class Play:
         if training:
             self.prefill_and_make_dataset()
         else:
-            self._dataset = iter(utils.load_dataset(self.datadir, self._c))
-
-
+            # self.episodes = utils.load_episodes(self.datadir, limit=self._c.max_dataset_steps)
+            # self._dataset = iter(utils.load_dataset(self.episodes, self._c))
+            pass
 
     # def prefill_and_make_dataset(self):
     #     # since it casuse error when random choice zero object in self.load_dataset
@@ -53,8 +54,12 @@ class Play:
 
     def prefill_and_make_dataset(self):
         # since it casuse error when random choice zero object in self.load_dataset
-        self.collect(using_random_policy=False, must_be_whole_episode=True)
-        self._dataset = iter(utils.load_dataset(self.datadir, self._c))
+        self.episodes = utils.load_episodes(
+            self.datadir, limit=self._c.max_dataset_steps
+        )
+        self.collect(using_random_policy=False, must_be_whole_episode=True,prefill = True)
+        self._dataset = iter(utils.load_dataset(self.episodes, self._c))
+
         print("inspect initial episode!!!!")
 
         # for i in range(500):
@@ -78,12 +83,12 @@ class Play:
             ob, reward, done, info = self.env.step(act)
             # if rendering:
             #     self.env.render(mode='human')
-                # rgb_array = self.env.render()
-                # rgb_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
-                # cv2.imshow("gameplay", rgb_array) 
-                # cv2.waitKey(1)
-                # if done:
-                #     cv2.destroyAllWindows()
+            # rgb_array = self.env.render()
+            # rgb_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+            # cv2.imshow("gameplay", rgb_array)
+            # cv2.waitKey(1)
+            # if done:
+            #     cv2.destroyAllWindows()
             collect_reward += reward
             if done:
                 break
@@ -155,7 +160,7 @@ class Play:
 
             return np.array(obs), np.array(rewards), np.array(dones)
 
-    def collect(self, using_random_policy=False, must_be_whole_episode=True):
+    def collect(self, using_random_policy=False, must_be_whole_episode=True, prefill = False):
         """
         collect end when the play_records full or episode end
         """
@@ -208,7 +213,7 @@ class Play:
 
             # # save play img
 
-            # if self.total_step % 50000 == 0:
+            # if self.episode_step % 50000 == 0:
             #     self.save_play_img = True
 
             # if self.save_play_img == True:
@@ -225,7 +230,7 @@ class Play:
             #     self.save_play_img = False
 
             ob, reward, done, info = self.act_repeat(self.env, argmax_act[0])
-            self.total_step += 1
+ 
 
             trainsaction = {
                 "ob": self.ob,
@@ -241,7 +246,7 @@ class Play:
             episode_record.append(trainsaction)
             # print(
             #     "collecting_data!!:",
-            #     self.total_step,
+            #     self.episode_step,
             #     "len(episode_record):",
             #     len(episode_record),
             # )
@@ -251,11 +256,26 @@ class Play:
             # to coumpute average reward of each step
             self.episode_reward += reward
             self.episode_step += 1  # to avoid devide by zero
+            self.total_step += 1
+            print("self.total_step:", self.total_step)
 
-            # for first 100 batch, play just 500 step
 
-            # if self.total_step < 50000:
-            if self.total_step % self._c.time_limit == 0:
+            if prefill == True:
+                self.episode_step = 1
+                self.total_step = 1
+            
+            else:
+                if self.episode_step % self._c.train_every == 0:
+                    self.dreaming_update()
+                    print("update complete!")
+                else:
+                    pass
+
+            
+
+
+            # if self.episode_step < 50000:
+            if self.episode_step % self._c.time_limit == 0:
                 print("pre-set!")
                 done = True
 
@@ -272,12 +292,12 @@ class Play:
                 self.model.reset()
 
                 # if len(episode_record) < self.TD_size:
-                if (
-                    len(episode_record)
-                    < self.batch_size * self.batch_length * self.TD_size
-                ):
+                if len(episode_record) < self.batch_length * self.TD_size:
                     print(
-                        "it is shorter than a minimum episode length, abort this episode"
+                        len(episode_record),
+                        " is shorter than a minimum episode length",
+                        self.batch_size * self.batch_length * self.TD_size,
+                        ", abort this episode",
                     )
                     trainsaction = {
                         "ob": self.ob,
@@ -333,14 +353,16 @@ class Play:
             }
 
             # reset the inner buffer
-            utils.save_episode(self.datadir, dict_of_episode_record)
-            if self.model.total_step % 20:
-                with self.model._writer.as_default():
-                    tf.summary.scalar(
-                        "episode_reward",
-                        tf.reduce_sum(tuple_of_episode_columns[3]),
-                        step=self.model.total_step,
-                    )
+            filename = utils.save_episode(self.datadir, dict_of_episode_record)
+            # if self.model.total_step % 100:
+            with self.model._writer.as_default():
+                tf.summary.scalar(
+                    "episode_reward",
+                    tf.reduce_sum(tuple_of_episode_columns[3]),
+                    step=self.total_step*self.act_repeat_time,
+                ) # control by model.total_step, record the env total step
+
+            self.post_process_episodes(self.episodes, filename, dict_of_episode_record)
 
             self.post_process_play_records()
         else:
@@ -348,6 +370,20 @@ class Play:
 
     def post_process_play_records(self):
         self.play_records = []
+
+    def post_process_episodes(self, cache, episode_name, episode):
+        total = 0
+        length = len(episode["rewards"]) - 1
+        for key, ep in reversed(sorted(cache.items(), key=lambda x: x[0])):
+
+            if (total + length) >= self._c.max_dataset_steps:
+                del cache[key]
+            else:
+
+                total += len(ep["rewards"]) - 1
+
+        cache[str(episode_name)] = episode
+        print("the episodes size now is:", total + length, "steps")
 
     def dreaming_update(self):
         """
@@ -439,23 +475,21 @@ class Play:
 
         # build model by call method
         init_obs = utils.preprocess(
-                {
-                    "obs": np.array([self.ob]),
-                    "obp1s": np.array([self.ob]),
-                    "rewards": 0,
-                },
-                self._c,
-            )[
-                "obs"
-            ]  # obp1s is for redundant here
+            {
+                "obs": np.array([self.ob]),
+                "obp1s": np.array([self.ob]),
+                "rewards": 0,
+            },
+            self._c,
+        )[
+            "obs"
+        ]  # obp1s is for redundant here
 
         act = self.model.policy(init_obs, training=False)[
             0
         ].numpy()  # to get batch dim,
         self.model.load_model_weights()
 
-
-        
         while True:  # stop only when episoe ends
             # episode = []
             # while True:
@@ -479,15 +513,14 @@ class Play:
                 act = self.model.policy(processed_obs, training=True)[
                     0
                 ].numpy()  # to get batch dim,
-                print("act:",act)
-                
+                print("act:", act)
 
             if self._c.is_discrete:
                 argmax_act = np.argmax(act, axis=-1)
 
             # # save play img
 
-            # if self.total_step % 50000 == 0:
+            # if self.episode_step % 50000 == 0:
             #     self.save_play_img = True
 
             # if self.save_play_img == True:
@@ -503,15 +536,15 @@ class Play:
             #     self.RGB_array_list = []
             #     self.save_play_img = False
 
-            if self.total_step <=1:
+            if self.episode_step <= 1:
                 argmax_act = [1]
-
 
             ob, reward, done, info = self.act_repeat(
                 self.env, argmax_act[0], rendering=True
             )
+
             self.total_step += 1
-            print("self.total_step:",self.total_step)
+            print("self.total_step:", self.total_step)
 
             self.ob = ob
 
@@ -521,10 +554,11 @@ class Play:
 
             # for first 100 batch, play just 500 step
 
-            # if self.total_step < 50000:
-            if self.total_step % self._c.time_limit == 0:
+            # if self.episode_step < 50000:
+            if self.episode_step % self._c.time_limit == 0:
                 print("pre-set!")
                 done = True
+                self.episode_step = 1
 
             if done:
                 print("game done!!")
@@ -537,4 +571,5 @@ class Play:
 
                 # for dreamer, it need to reset state at end of every episode
                 self.model.reset()
+                self.episode_step = 1
                 break

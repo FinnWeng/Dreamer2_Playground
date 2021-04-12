@@ -59,107 +59,93 @@ def save_episode(directory, episode_record):
         f1.seek(0)
         with filename.open("wb") as f2:
             f2.write(f1.read())
+    
+    return filename
+    
 
 
-def load_episodes(directory, rescan, length=None, balance=False, seed=0):
+def load_episodes(directory,limit = None):
     # rescan - output shape
     directory = pathlib.Path(directory).expanduser()
-    random = np.random.RandomState(seed)
+    
     cache = {}  # len 33
     # start_time = time.time()
+    total_step = 0
 
-    while True:
-        for filename in directory.glob("*.npz"):
+
+    for filename in reversed(sorted(directory.glob("*.npz"))):
+        
+
+        try:
+            with filename.open("rb") as f:
+                # print("start loading!")
+                episode = np.load(f)
+                # episode = np.load(f,allow_pickle=True)
+
+                # print("finish loading!")
+
+                episode = {
+                    k: episode[k] for k in episode.keys()
+                }  # dict_keys(['image', 'action', 'reward', 'discount'])
+
+        except Exception as e:
+            print(f"Could not load episode: {e}")
+            continue
+        cache[str(filename)] = episode
+        total_step += (len(episode["rewards"]) - 1)
+        if limit is not None:
+            print("limit is not None")
             
-            if filename not in cache:
-                try:
-                    with filename.open("rb") as f:
-                        # print("start loading!")
-                        episode = np.load(f)
-                        # episode = np.load(f,allow_pickle=True)
-
-                        # print("finish loading!")
-
-                        episode = {
-                            k: episode[k] for k in episode.keys()
-                        }  # dict_keys(['image', 'action', 'reward', 'discount'])
-
-                except Exception as e:
-                    print(f"Could not load episode: {e}")
-                    continue
-                cache[filename] = episode
-        keys = list(cache.keys())  # which means each name of episode record in dir
+            if total_step >= limit:
+                print("over the limit!")
+                break
+    keys = list(cache.keys())  # which means each name of episode record in dir
+    print("total_step:",total_step)
+    print("keys:",len(keys))
+    return cache
         
 
 
-        # # for not using generater
-        # episode_list = []
-        # # print("len(keys):",keys)
-        # for index in random.choice(len(keys), rescan):
-        #     episode = cache[keys[index]]  # {k: list of value}
-        #     if length:
-        #         total = len(next(iter(episode.values())))
-
-        #         available = total - length
-
-        #         if available < 1:
-        #             print(f"Skipped short episode of length {available}.")
-        #             continue
-        #         if balance:
-        #             index = min(random.randint(0, total), available)
-        #         else:
-        #             index = int(
-        #                 random.randint(0, available)
-        #             )  # randomly choose 0~available samples of  batch_length traj
-
-        #         episode = {k: v[index : index + length] for k, v in episode.items()}
-
-        #     # # # turn into list of dict
-        #     # print("rescan:", rescan)  # 100
-        #     # print("length:", length)  # 10
-        #     # print("episode['obs'].shape():", episode["obs"].shape)  # (10, 64, 64, 3)
-        #     episode_list.append(episode)
-        # episode = {
-        #     k: np.stack([episode[k] for episode in episode_list], 0)
-        #     for k, v in episode_list[0].items()
-        # }
-        # return episode
-
-
-        for index in random.choice(len(keys), rescan):
-            episode = cache[keys[index]]
-            if length:
-                total = len(next(iter(episode.values())))
-
-                available = total - length
-                
-
-                if available < 1:
-                    print(f"Skipped short episode of length {available}.")
-                    continue
-                if balance:
-                    index = min(random.randint(0, total), available)
-                else:
-                    index = int(
-                        random.randint(0, available)
-                    )  # randomly choose 0~available samples of  batch_length traj
-
-                episode = {k: v[index : index + length] for k, v in episode.items()}
+def sample_episodes(episodes,length=None, balance=False, seed=0):
+    random = np.random.RandomState(seed)
+    # for index in random.choice(len(keys), rescan):
+    while True:
+        episode = random.choice(list(episodes.values()))
+        # episode = cache[keys[index]]
+        if length:
+            total = len(next(iter(episode.values())))
+            # print("this sampled episode length is:",total)
+            available = total - length
             
-            yield episode
-    
+
+            if available < 1:
+                print(f"Skipped short episode of length {available}.")
+                continue
+            if balance:
+                index = min(random.randint(0, total), available)
+            else:
+                index = int(
+                    random.randint(0, available+1)
+                )  # randomly choose 0~available samples of  batch_length traj
+
+            episode = {k: v[index : index + length] for k, v in episode.items()}
+        
+        yield episode
 
 
-def load_dataset(directory, config):  # load data from npz
+
+def load_dataset(episodes, config):  # load data from npz
     # episode = load_episodes(directory, 1)
-    episode = next(load_episodes(directory, 1))
-    types = {k: v.dtype for k, v in episode.items()}
+    # episode = next(load_episodes(directory, 1))
+
+    example = episodes[next(iter(episodes.keys()))]
+    types = {k: v.dtype for k, v in example.items()}
     
-    shapes = {k: (None,) + v.shape[1:] for k, v in episode.items()}
+    shapes = {k: (None,) + v.shape[1:] for k, v in example.items()}
     print("shapes:",shapes)
 
-    generator = lambda: load_episodes(
-        directory, config.train_steps, config.batch_length, config.dataset_balance
+    generator = lambda: sample_episodes(
+        episodes, config.batch_length, config.oversample_ends,
     )
     
     dataset = tf.data.Dataset.from_generator(generator, types, shapes)
