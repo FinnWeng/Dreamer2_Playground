@@ -885,18 +885,33 @@ class Dreamer:
             imag_feat = self.imagine_ahead(
                 post
             )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
+
+            imag_action = self.actor(imag_feat).mode()
+
+            imag_action_prob = self.actor(imag_feat).log_prob(imag_action)[:-1]
+            print("imag_action_prob:",imag_action_prob) # (2499, 15)
+
             # print("imag_feat.shape:",imag_feat.shape) # (500, 15, 230)
             pcont = self._pcont(imag_feat).mean()
             # print("pcont.shape:",pcont.shape) # 500, 15
+
             lambda_returns = self.lambda_returns(
                 imag_feat, pcont, _lambda=self._c.disclam
             )  # an exponentially-weighted average of the estimates V for different k to balance bias and variance
             # print("lambda_returns: ",lambda_returns.shape) # ( )
 
-            actor_loss = -tf.reduce_sum(
-                lambda_returns, 0
-            )  # !!!!! not using policy gradient !!!! directy maximize return (horizon, batch_size*batch_length)
+            value_diff = tf.stop_gradient(
+                tf.transpose(lambda_returns, [1, 0])[1:] - self.critic(imag_feat[:-1]).mode())
+            
+            print("value_diff:",value_diff)
 
+            actor_loss = imag_action_prob*value_diff
+
+            mix_actor_loss = tf.transpose(lambda_returns, [1, 0])[1:] * 0.1 + (1 - 0.1)*actor_loss
+
+            actor_loss = -tf.reduce_sum(
+                mix_actor_loss 
+            )  
             actor_loss = tf.reduce_mean(actor_loss)
 
         actor_var = []
