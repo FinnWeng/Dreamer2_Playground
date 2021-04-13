@@ -187,3 +187,35 @@ class OneHotDist:
 
     def _one_hot(self, indices):
         return tf.one_hot(indices, self._num_classes, dtype=self._dtype)
+
+
+def schedule(string, step):
+    try:
+        return float(string)
+    except ValueError:
+        step = tf.cast(step, tf.float32)
+        match = re.match(r"linear\((.+),(.+),(.+)\)", string)
+        if match:
+            initial, final, duration = [float(group) for group in match.groups()]
+            mix = tf.clip_by_value(step / duration, 0, 1)
+            return (1 - mix) * initial + mix * final
+        match = re.match(r"warmup\((.+),(.+)\)", string)
+        if match:
+            warmup, value = [float(group) for group in match.groups()]
+            scale = tf.clip_by_value(step / warmup, 0, 1)
+            return scale * value
+        match = re.match(r"exp\((.+),(.+),(.+)\)", string)
+        if match:
+            initial, final, halflife = [float(group) for group in match.groups()]
+            return (initial - final) * 0.5 ** (step / halflife) + final
+        match = re.match(r"horizon\((.+),(.+),(.+)\)", string)
+        if match:
+            initial, final, duration = [float(group) for group in match.groups()]
+            mix = tf.clip_by_value(step / duration, 0, 1)
+            horizon = (1 - mix) * initial + mix * final
+            return 1 - 1 / horizon
+        raise NotImplementedError(string)
+
+
+def count_steps(folder):
+    return sum(int(str(n).split("-")[-1][:-4]) - 1 for n in folder.glob("*.npz"))

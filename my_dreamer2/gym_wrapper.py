@@ -12,17 +12,33 @@ class Gym_Wrapper:
         self.resize_size = (64, 64)
         self._actionRepeat = 4
         self._observation = []
-        self.action_space = self._env.action_space
+        # self.action_space = self._env.action_space
         self.action_dim = self._env.action_space.n
         self.observation_space = self._env.observation_space
-        print("self.action_space.n:", self.action_space.n)
-        print("self.observation_space:", self.observation_space)
+        # print("self.action_space.n:", self.action_space.n)
+        # print("self.observation_space:", self.observation_space)
         self.shape = self._env.observation_space.shape[:2] + (
             () if self._grayscale else (3,)
         )
         self._buffers = [
             np.empty(self.shape, dtype=np.uint8) for _ in range(2)
         ]  # to save observation to gray scale or others. Not replay buffer.
+
+
+
+    
+    @property
+    def action_space(self):
+        shape = (self._env.action_space.n,)
+        space = gym.spaces.Box(low=0, high=1, shape=shape, dtype=np.float32)
+        self._mask = np.logical_and(
+            np.isfinite(space.low),
+            np.isfinite(space.high))
+        self._low = np.where(self._mask, space.low, -1)
+        self._high = np.where(self._mask, space.high, 1)
+        low = np.where(self._mask, -np.ones_like(self._low), self._low)
+        high = np.where(self._mask, np.ones_like(self._low), self._high)
+        return gym.spaces.Box(low, high, dtype=np.float32)
 
     def crop_ob(self, ob):
         h_start = self.shape[0] - self.crop_size[0]

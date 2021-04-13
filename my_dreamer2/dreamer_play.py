@@ -21,6 +21,10 @@ class Play:
         self.ob, _, _, _ = self.env.step(
             self.env._env.action_space.sample()
         )  # whether it is discrete or not, 0 is proper
+        acts = self.env.action_space
+
+        self._c.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
+        print("self._c.num_actions:", self._c.num_actions)
         # self.batch_size = 16
         self.batch_size = self._c.batch_size
         self.batch_length = (
@@ -57,7 +61,13 @@ class Play:
         self.episodes = utils.load_episodes(
             self.datadir, limit=self._c.max_dataset_steps
         )
-        self.collect(using_random_policy=False, must_be_whole_episode=True,prefill = True)
+        while True:
+            self.collect(
+                using_random_policy=True, must_be_whole_episode=True, prefill=True
+            )
+            if self.total_step >= self._c.prefill:
+                self.reset_total_step()
+                break
         self._dataset = iter(utils.load_dataset(self.episodes, self._c))
 
         print("inspect initial episode!!!!")
@@ -160,7 +170,9 @@ class Play:
 
             return np.array(obs), np.array(rewards), np.array(dones)
 
-    def collect(self, using_random_policy=False, must_be_whole_episode=True, prefill = False):
+    def collect(
+        self, using_random_policy=False, must_be_whole_episode=True, prefill=False
+    ):
         """
         collect end when the play_records full or episode end
         """
@@ -189,7 +201,8 @@ class Play:
             # episode = []
             # while True:
             if using_random_policy:
-                act = self.model.random_policy_playing().numpy()  # to get batch dim
+                act = self.model.random_policy()[0].numpy()  # to get batch dim
+                print("act:",act)
 
             else:
 
@@ -230,7 +243,6 @@ class Play:
             #     self.save_play_img = False
 
             ob, reward, done, info = self.act_repeat(self.env, argmax_act[0])
- 
 
             trainsaction = {
                 "ob": self.ob,
@@ -259,20 +271,16 @@ class Play:
             self.total_step += 1
             print("self.total_step:", self.total_step)
 
-
             if prefill == True:
                 self.episode_step = 1
-                self.total_step = 1
-            
+                # self.total_step = 1
+
             else:
                 if self.episode_step % self._c.train_every == 0:
                     self.dreaming_update()
                     print("update complete!")
                 else:
                     pass
-
-            
-
 
             # if self.episode_step < 50000:
             if self.episode_step % self._c.time_limit == 0:
@@ -359,8 +367,8 @@ class Play:
                 tf.summary.scalar(
                     "episode_reward",
                     tf.reduce_sum(tuple_of_episode_columns[3]),
-                    step=self.total_step*self.act_repeat_time,
-                ) # control by model.total_step, record the env total step
+                    step=self.total_step * self.act_repeat_time,
+                )  # control by model.total_step, record the env total step
 
             self.post_process_episodes(self.episodes, filename, dict_of_episode_record)
 
@@ -573,3 +581,9 @@ class Play:
                 self.model.reset()
                 self.episode_step = 1
                 break
+
+    def reset_total_step(self):
+        '''
+        When prefill end, call this function
+        '''
+        self.total_step = 1

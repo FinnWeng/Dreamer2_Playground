@@ -4,8 +4,10 @@ import numpy as np
 import cv2
 import net.layers as layers
 from tensorflow_probability import distributions as tfd
+from tensorflow.keras.mixed_precision import experimental as prec
 import collections
 import utils
+import re
 
 
 def world_model_imagine(fn, state_dict, action_array):
@@ -136,7 +138,7 @@ class ConvDecoder(tf.keras.Model):
         )(x)
         x = self.get(
             "h4", tf.keras.layers.Conv2DTranspose, 1 * self._depth, 6, **kwargs
-        )(x)
+        )(x) 
         x = self.get(
             "h5", tf.keras.layers.Conv2DTranspose, self._shape[-1], 6, strides=2
         )(x)
@@ -433,6 +435,7 @@ class Dreamer:
         # so the action_dim means number of action. it is different from for discrete space, kinds of choice.
         self.env = env
         self._c = config
+        self._float = prec.global_policy().compute_dtype
         actspace = self.env.action_space
         self._actspace = actspace
         self._actdim = actspace.n if hasattr(actspace, "n") else actspace.shape[0]
@@ -465,6 +468,7 @@ class Dreamer:
         self.eta_gamma = config.eta_gamma
         self.eta_t = config.eta_t
         self.eta_q = config.eta_q
+        # self.actor_entropy = lambda x=self._c.actor_entropy: schedule(x, self._step)
 
         self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
         self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
@@ -498,6 +502,8 @@ class Dreamer:
             init_std=self._c.action_init_std,
             act=actv,
         )
+        # print("tf.zeros_like(acts.low):",tf.zeros_like(actspace.low)) # tf.Tensor([0. 0. 0. 0.], shape=(4,), dtype=float32)
+        self.random_actor = tools.OneHotDist(tf.zeros_like(actspace.low)[None])
 
         model_modules = [self.encoder, self.dynamics, self.decoder, self.reward_decoder]
         self.state = None
@@ -515,6 +521,7 @@ class Dreamer:
         )
         self.total_step = 1
         # self.total_step = int(15.66*1000)
+
         self.save_play_img = False
 
         self.RGB_array_list = []
@@ -567,36 +574,50 @@ class Dreamer:
         # this reset the state saved for RSSM forwarding
         self.state = None
 
-    def _exploration(self, action, training):
-        if training:
-            amount = self._c.expl_amount
-            if self._c.expl_decay:  # 0.3 is True
-                amount *= 0.5 ** (tf.cast(self._step, tf.float32) / self._c.expl_decay)
-            if self._c.expl_min:  # 0.0 is False
-                amount = tf.maximum(self._c.expl_min, amount)
-            self._metrics["expl_amount"].update_state(amount)
-        elif self._c.eval_noise:
-            amount = self._c.eval_noise
-        else:
-            return action
-        if self._c.expl == "additive_gaussian":
-            return tf.clip_by_value(tfd.Normal(action, amount).sample(), -1, 1)
-        if self._c.expl == "completely_random":
-            return tf.random.uniform(action.shape, -1, 1)
-        if self._c.expl == "epsilon_greedy":
-            # print(
-            #     "0 * action:", 0 * action
-            # )  # 0 * action: Tensor("mul:0", shape=(1, 4), dtype=float16)
-            indices = tfd.Categorical(0 * action).sample()
-            # print("epsilon_greedy indices:", indices)  # shape=(1,)
-            return tf.where(
-                tf.random.uniform(action.shape[:1], 0, 1)
-                < amount,  # randomly decide do epsilon greedy or not
-                tf.one_hot(indices, action.shape[-1], dtype=tf.float32),
-                action,
-            )
+    # def _exploration(self, action, training):
+    #     if training:
 
-        raise NotImplementedError(self._c.expl)
+    #         amount = self._c.expl_amount
+    #         if self._c.expl_decay:  # 0.3 is True
+    #             amount *= 0.5 ** (tf.cast(self._step, tf.float32) / self._c.expl_decay)
+    #         if self._c.expl_min:  # 0.0 is False
+    #             amount = tf.maximum(self._c.expl_min, amount)
+    #         self._metrics["expl_amount"].update_state(amount)
+    #     elif self._c.eval_noise:
+    #         amount = self._c.eval_noise
+    #     else:
+    #         return action
+    #     if self._c.expl == "additive_gaussian":
+    #         return tf.clip_by_value(tfd.Normal(action, amount).sample(), -1, 1)
+    #     if self._c.expl == "completely_random":
+    #         return tf.random.uniform(action.shape, -1, 1)
+    #     if self._c.expl == "epsilon_greedy":
+    #         # print(
+    #         #     "0 * action:", 0 * action
+    #         # )  # 0 * action: Tensor("mul:0", shape=(1, 4), dtype=float16)
+    #         indices = tfd.Categorical(0 * action).sample()
+    #         # print("epsilon_greedy indices:", indices)  # shape=(1,)
+    #         return tf.where(
+    #             tf.random.uniform(action.shape[:1], 0, 1)
+    #             < amount,  # randomly decide do epsilon greedy or not
+    #             tf.one_hot(indices, action.shape[-1], dtype=tf.float32),
+    #             action,
+    #         )
+
+    #     raise NotImplementedError(self._c.expl)
+
+    def _exploration(self, action, training):
+        amount = self._c.expl_amount if training else self._c.eval_noise
+        if amount == 0:
+            return action
+        amount = tf.cast(amount, self._float)
+        if "onehot" in self._c.action_dist:
+            probs = amount / self._c.num_actions + (1 - amount) * action
+            # print("the noisy prob is:", probs)
+            return tools.OneHotDist(probs=probs).sample()
+        else:
+            return tf.clip_by_value(tfd.Normal(action, amount).sample(), -1, 1)
+        raise NotImplementedError(self._c.action_noise)
 
     def policy(self, obs, training=False):
         # this combine the encoder and actor and get feat to get a totoal agent policy
@@ -618,11 +639,17 @@ class Dreamer:
 
         action = self._exploration(action, training)
 
-        if self._c.is_discrete:
-            action = tf.nn.softmax(action, axis=-1)
+        # if self._c.is_discrete:
+        #     action = tf.nn.softmax(action, axis=-1)
 
         state = (latent, action)
         return action, state
+    def random_policy(self):
+        action = self.random_actor.sample()
+        if self._c.is_discrete:
+            action = tf.nn.softmax(action, axis=-1)
+        return action, None
+
 
     def imagine_ahead(self, start_state):
         # each value of start_state(post) dict is (25, batch_length,30)
@@ -869,6 +896,7 @@ class Dreamer:
             actor_loss = -tf.reduce_sum(
                 lambda_returns, 0
             )  # !!!!! not using policy gradient !!!! directy maximize return (horizon, batch_size*batch_length)
+
             actor_loss = tf.reduce_mean(actor_loss)
 
         actor_var = []
@@ -940,9 +968,9 @@ class Dreamer:
 
         self.total_step += 1
         tf.summary.experimental.set_step(self.total_step)
-        
+
         if self.total_step % 20 == 0:
-            print("update finish, save summary..., now update step:",self.total_step)
+            print("update finish, save summary..., now update step:", self.total_step)
             with self._writer.as_default():
                 tf.summary.scalar(
                     "actor_loss/reverse_lambda_return", actor_loss, step=self.total_step

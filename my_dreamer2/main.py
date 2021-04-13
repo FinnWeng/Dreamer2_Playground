@@ -35,6 +35,7 @@ def define_config():
     config.envs = 1
     config.parallel = "none"
     config.action_repeat = 4
+    config.eval_noise = 0.0
     config.time_limit = 108000
     config.prefill = 50000
     config.eval_noise = 0.0
@@ -58,6 +59,7 @@ def define_config():
     config.eta_q = 0.02
     config.weight_decay = 0.0
     config.weight_decay_pattern = r".*"
+    config.actor_entropy: "linear(3e-3,3e-4,2.5e6)"
     # Training.
     config.batch_size = 50
 
@@ -81,6 +83,7 @@ def define_config():
     config.horizon = 15
     #   config.action_dist = 'tanh_normal' # for continous action
     config.action_dist = "onehot"  # for onehot action
+    config.expl_amount = 0.0
     config.action_init_std = 5.0
     #   config.expl = 'additive_gaussian'
     config.expl = "epsilon_greedy"
@@ -115,7 +118,9 @@ if __name__ == "__main__":
         for single play record, since I adopt act repeat and TD method, so it contain repeat_time*TD_size frames
         """
         print("play_process.play_records:", len(play_process.play_records))
-        play_process.collect(using_random_policy=False, must_be_whole_episode=False,prefill = False)
+        play_process.collect(
+            using_random_policy=False, must_be_whole_episode=False, prefill=False
+        )
         print("play_process.play_records:", len(play_process.play_records))
         mean_reward = play_process.dreaming_update()
         print("rewards:", mean_reward)
