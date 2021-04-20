@@ -6,13 +6,16 @@ import cv2
 import pickle
 import utils
 
+def count_steps(folder):
+  return sum(int(str(n).split('-')[-1][:-4]) - 1 for n in folder.glob('*.npz'))
+
 
 class Play:
     def __init__(self, env, model_maker, config, training=True):
         self.env = env
 
         # self.act_space = self.env.action_space
-        self.model = model_maker(self.env, training, config)
+        
         self._c = config
         self.env.reset()
         # self.ob, _, _, _ = self.env.step(
@@ -35,6 +38,7 @@ class Play:
         self.act_repeat_time = self._c.action_repeat
         self.advantage = True
 
+        self._step = tf.Variable(count_steps(config.traindir), dtype=tf.int64)
         self.total_step = 1
         self.exploration_rate = 0.0  # the exploration is in dreamer_net
         self.save_play_img = False
@@ -44,6 +48,9 @@ class Play:
         self.horizon = 15
         self.datadir = self._c.logdir / "episodes"
         # self._dataset = iter(self.load_dataset(self.datadir, self._c))
+
+        self.model = model_maker(self.env, training, self._step, self._c)
+
         if training:
             self.prefill_and_make_dataset()
         else:
@@ -349,7 +356,7 @@ class Play:
             episode_record = []
             tuple_of_episode_columns = self.TD_dict_to_TD_train_data(
                 self.play_records, True
-            )
+            ) # for Dreamer, the TD = 1
 
             dict_of_episode_record = {
                 "obs": tuple_of_episode_columns[0],

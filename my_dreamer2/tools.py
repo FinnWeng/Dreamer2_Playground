@@ -219,3 +219,66 @@ def schedule(string, step):
 
 def count_steps(folder):
     return sum(int(str(n).split("-")[-1][:-4]) - 1 for n in folder.glob("*.npz"))
+
+
+def static_scan(fn, inputs, start, reverse=False):
+    last = start
+    outputs = [[] for _ in tf.nest.flatten(start)]
+    indices = range(len(tf.nest.flatten(inputs)[0]))
+    if reverse:
+        indices = reversed(indices)
+    for index in indices:
+        inp = tf.nest.map_structure(lambda x: x[index], inputs)
+
+        last = fn(last, inp)
+        [o.append(l) for o, l in zip(outputs, tf.nest.flatten(last))]
+    if reverse:
+        outputs = [list(reversed(x)) for x in outputs]
+    outputs = [tf.stack(x, 0) for x in outputs]
+    return tf.nest.pack_sequence_as(start, outputs)
+    # inputs = reward + pcont * next_values * (1 - lambda_)
+    # fn = lambda agg, cur: cur[0] + cur[1] * lambda_ * agg
+    # i = reverse(index)
+    #
+    # start = input[i] + pcont[i]* lambda_ * start
+    #
+    # (1- lambda) * sigma(lambda*Vn) + lambda* Vn+1
+    # Vn = sigma(r) + vn
+    # (1 - lambda)  (sigma(v1*lambda**1+...+vn*lambda**n) + sigma_to_n(sigma_to_k(r*lambda**n))) + lambda* Vn+1 # two kind of sigma
+
+class Optimizer(tf.Module):
+    def __init__(self,name,lr,eps=1e-4, clip=None, wd, wd_pattern=r'.*',opt = "adam"):
+        self._name = name
+        self._clip = clip
+        self._wd = wd
+        self._wd_pattern = wd_pattern
+        self._opt = {
+            'adam': lambda: tf.optimizers.Adam(lr, epsilon=eps),
+            'nadam': lambda: tf.optimizers.Nadam(lr, epsilon=eps),
+            'adamax': lambda: tf.optimizers.Adamax(lr, epsilon=eps),
+            'sgd': lambda: tf.optimizers.SGD(lr),
+            'momentum': lambda: tf.optimizers.SGD(lr, 0.9),
+        }[opt]()
+    
+    def __call__(self, tape, loss, modules):
+        modules = modules if hasattr(modules, '__len__') else (modules,)
+        varibs = tf.nest.flatten([module.variables for module in modules])
+        grads = tape.gradient(loss, varibs)
+        norm = tf.linalg.global_norm(grads)
+        if self._clip:
+            grads, _ = tf.clip_by_global_norm(grads, self._clip, norm)
+        
+        if self._wd:
+            self._apply_weight_decay(varibs)
+        
+        self._opt.apply_gradients(zip(grads, varibs))
+    
+    def _apply_weight_decay(self, varibs):
+        nontrivial = (self._wd_pattern != r'.*')
+        if nontrivial:
+        print('Applied weight decay to variables:')
+        for var in varibs:
+        if re.search(self._wd_pattern, self._name + '/' + var.name):
+            if nontrivial:
+            print('- ' + self._name + '/' + var.name)
+            var.assign((1 - self._wd) * var)

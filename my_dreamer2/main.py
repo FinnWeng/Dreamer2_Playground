@@ -57,8 +57,8 @@ def define_config():
     config.eta_gamma = 1
     config.eta_t = 0.08
     config.eta_q = 0.02
-    config.weight_decay = 0.0
-    config.weight_decay_pattern = r".*"
+    config.weight_decay = 1e-6
+
     config.actor_entropy: "linear(3e-3,3e-4,2.5e6)"
     # Training.
     config.batch_size = 50
@@ -76,10 +76,16 @@ def define_config():
     config.value_lr = 1e-5
     config.actor_lr = 4e-5
     config.grad_clip = 100.0
+    config.actor_grad_clip = 100.0
+    config.value_grad_clip = 100.0
+    config.opt_eps = 1e-5
     config.dataset_balance = False
+    config.kl_balance = 0.8
+    config.kl_scale = 0.1
+    config.kl_free = 0.0
     # Behavior.
     config.discount = 0.99
-    config.disclam = 0.95
+    config.discount_lambda = 0.95
     config.horizon = 15
     #   config.action_dist = 'tanh_normal' # for continous action
     config.action_dist = "onehot"  # for onehot action

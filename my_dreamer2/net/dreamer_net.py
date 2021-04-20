@@ -138,7 +138,7 @@ class ConvDecoder(tf.keras.Model):
         )(x)
         x = self.get(
             "h4", tf.keras.layers.Conv2DTranspose, 1 * self._depth, 6, **kwargs
-        )(x) 
+        )(x)
         x = self.get(
             "h5", tf.keras.layers.Conv2DTranspose, self._shape[-1], 6, strides=2
         )(x)
@@ -421,7 +421,7 @@ class RSSM(tf.keras.Model):
 
 
 class Dreamer:
-    def __init__(self, env, is_training, config):
+    def __init__(self, env, is_training, step, config):
 
         # define callback and set networ parameters
         gpus = tf.config.experimental.list_physical_devices("GPU")
@@ -512,15 +512,20 @@ class Dreamer:
         # self.actor_tffn = tf.function(self.actor)
         # self.critic_tffn = tf.function(self.critic)
 
-        self.world_optimizer = tf.optimizers.Adam(self._c.model_lr)
-        self.actor_optimizer = tf.optimizers.Adam(self._c.actor_lr)
-        self.critic_optimizer = tf.optimizers.Adam(self._c.value_lr)
+        # self.world_optimizer = tf.optimizers.Adam(self._c.model_lr)
+        # self.actor_optimizer = tf.optimizers.Adam(self._c.actor_lr)
+        # self.critic_optimizer = tf.optimizers.Adam(self._c.value_lr)
+
+        self.world_optimizer = tools.Optimizer(self._c.model_lr,self._c.opt_eps,self._c.grad_clip,self._c.weight_decay, self._c.opt)
+        self.actor_optimizer = tools.Optimizer(self._c.actor_lr,self._c.opt_eps,self._c.actor_grad_clip,self._c.weight_decay, self._c.opt)
+        self.critic_optimizer = tools.Optimizer(self._c.value_lr,self._c.opt_eps,self._c.value_grad_clip,self._c.weight_decay, self._c.opt)
 
         self._writer = tf.summary.create_file_writer(
             "./tf_log", max_queue=1000, flush_millis=20000
         )
-        self.total_step = 1
-        # self.total_step = int(15.66*1000)
+        self._step = step
+        self.update_step = 1
+        # self.update_step = int(15.66*1000)
 
         self.save_play_img = False
 
@@ -644,12 +649,12 @@ class Dreamer:
 
         state = (latent, action)
         return action, state
+
     def random_policy(self):
         action = self.random_actor.sample()
         if self._c.is_discrete:
             action = tf.nn.softmax(action, axis=-1)
         return action, None
-
 
     def imagine_ahead(self, start_state):
         # each value of start_state(post) dict is (25, batch_length,30)
@@ -677,8 +682,35 @@ class Dreamer:
         imag_feat = self.dynamics.get_feat(
             states
         )  # concate state and obs # (1225,15,  230)
+        print("imag_feat:", imag_feat.shape)
 
         return imag_feat
+
+    def official_lambda_return(self, reward, value, pcont, bootstrap, lambda_, axis):
+        # Setting lambda=1 gives a discounted Monte Carlo return.
+        # Setting lambda=0 gives a fixed 1-step return.
+        assert reward.shape.ndims == value.shape.ndims, (reward.shape, value.shape)
+        if isinstance(pcont, (int, float)):
+            pcont = pcont * tf.ones_like(reward)
+        dims = list(range(reward.shape.ndims))
+        dims = [axis] + dims[1:axis] + [0] + dims[axis + 1 :]
+        if axis != 0:
+            reward = tf.transpose(reward, dims)
+            value = tf.transpose(value, dims)
+            pcont = tf.transpose(pcont, dims)
+        if bootstrap is None:
+            bootstrap = tf.zeros_like(value[-1])
+        next_values = tf.concat([value[1:], bootstrap[None]], 0)
+        inputs = reward + pcont * next_values * (1 - lambda_)
+        returns = tools.static_scan(
+            lambda agg, cur: cur[0] + cur[1] * lambda_ * agg,
+            (inputs, pcont),
+            bootstrap,
+            reverse=True,
+        )
+        if axis != 0:
+            returns = tf.transpose(returns, dims)
+        return returns
 
     def lambda_returns(self, img_feat, pcont, _lambda):
         """
@@ -695,81 +727,70 @@ class Dreamer:
         ).mode()  # reward_pred.sample(): (25*batch_length,horizon-1)
 
         value = self.critic(img_feat).mode()  # (25*batch_length,horizon)
+        """
+        value: (2450, 15)
+        reward_pred: (2450, 15)
+        pcont: (2450, 15)
+        """
 
         value = tf.transpose(value, [1, 0])
         reward_pred = tf.transpose(reward_pred, [1, 0])
         pcont = tf.transpose(pcont, [1, 0])
-        # print("value:",value.shape) # (horizon, 25*batch_length)
-        # print("reward_pred:",reward_pred.shape)# (horizon, 25*batch_length)
-        # print("pcont:",pcont.shape)
 
-        # # now try to assemble above to become lambda reward
-        # # reward_pcont = tf.concat([tf.ones_like(pcont[0]), pcont[:-1]], 0)
-        # # discount_reward_pred = [
-        # #     reward_pred[i, :] * reward_pcont for i in range(self._c.horizon)]
-        # # discount_value = [value[i, :] * pcont for i in range(self._c.horizon)]
+        """
+        value: (15, 2450)
+        reward_pred: (15, 2450)
+        pcont: (15, 2450)
+        """
 
-        # discount_reward_pred = [
-        #     reward_pred[i, :] * pcont[i,:] for i in range(self._c.horizon)]
-        # discount_value = [value[i, :] * pcont[i,:] for i in range(self._c.horizon)]
+        # # revised
+        # type2_sum = tf.zeros_like(value[:1])  # 1, 500
+        # type3_list = []
+        # discount_reward = reward_pred * pcont
+        # discount_value = value * pcont
+        # for h in range(self._c.horizon - 1):  # 14, the k is n-1 in paper
+        #     sum_to_k_to_k_discount_reward = [tf.reduce_sum(
+        #         discount_reward[:h]*, 0, keepdims=True
+        #     ) for k in range(h)]  # 1,500. +1
+        #     sum_to_k_to_k_discount_reward = tf.reduce_sum(tf.stack(sum_to_k_to_k_discount_reward,0),0)
 
-        # # accu_discount_reward_pred = []
-        # # for i in range(self._c.horizon):
-        # #     accu_discount_reward_pred.append(discount_reward_pred[:i])
-        # # accu_discount_reward_pred = [
-        # #     tf.reduce_sum(tf.stack(accu_discount_reward_pred[j], -1), 0)
-        # #     * _lambda ** (i)
-        # #     for j in range(self._c.horizon)
-        # # ]  # sum for type 2, which to k step
-        # # accu_discount_reward_pred = tf.stack(
-        # #     accu_discount_reward_pred, axis=0
-        # # )  # (15,1225) , for each reward accumulate to n step.
+        #     to_kp_value = tf.reduce_sum(
+        #         discount_value[h], 0, keepdims=True
+        #     )  # (H-h,500) => (1, 500), the value is next value
 
-        # accu_discount_reward_pred = tf.stack(
-        #     accu_discount_reward_pred, axis=0
-        # )  # (15,1225) , for each reward accumulate to n step.
+        #     to_kp1_value = tf.reduce_sum(
+        #         discount_value[h + 1], 0, keepdims=True
+        #     )  # (H-h,500) => (1, 500), the value is next value
 
-        # type2 = (1 - _lambda)(
-        #     accu_discount_reward_pred[:-1] + discount_value[:-1]
-        # )  # (14,1225)
+        #     type3 = (1 - _lambda) * (
+        #         sum_to_k_discount_reward * (_lambda ** (h)) + type2_sum
+        #     ) + (_lambda ** (h + 1)) * to_kp1_value
+        #     type3_list.append(type3)
 
-        # last = [
-        #     _lambda ** (i - 1) * (accu_discount_reward_pred[i] + discount_value[i])
-        #     for i in range(self._c.horizon)
-        # ]  # to make horizon -1 lambda returns # # (15,1225)
-        # # last = tf.stack(last, 0)  # (15,1225)
+        #     type2_sum = _lambda * (type2_sum + sum_to_k_discount_reward) + to_kp_value  
 
-        # type3s = [
-        #     tf.reduce_sum(type2[:i], axis=0) + last[i] for i in range(self._c.horizon)
-        # ]  # (15,1225)
+        # # type2_list.append(last_type2)
 
-        # revised
-        type2_list = []
-        discount_reward = reward_pred * pcont
-        discount_value = value * pcont
-        for k in range(self._c.horizon - 1):  # 14, the k is n-1 in paper
-            sum_to_k_discount_reward = tf.reduce_sum(
-                discount_reward[: k + 1], 0, keepdims=True
-            )  # 1,500. +1 actualy take to k,avoid dimension vanish
-            to_kp1_value = tf.expand_dims(
-                discount_value[k + 1], 0
-            )  # 1,500, the value is next value
-            type2 = sum_to_k_discount_reward + to_kp1_value  # 1,500
-            type2 = type2 * _lambda ** (k) * (1 - _lambda)
-            type2_list.append(type2)  # if conver to array, (horizon-1, 500)
+        # type3s = tf.concat(type3_list, 0)  # (horizon, 500)
 
-        sum_to_k_discount_reward = tf.reduce_sum(
-            discount_reward, 0, keepdims=True
-        )  # 1,500
-        to_kp1_value = tf.expand_dims(discount_value[-1], 0)  # 1,500
-        last_type2 = sum_to_k_discount_reward + to_kp1_value  # 1,500
-        last_type2 = last_type2 * _lambda ** (self._c.horizon - 1)  # 1, 500
+        offical_LamR_result = self.official_lambda_return(
+            reward_pred[:-1],
+            value[:-1],
+            pcont[:-1],
+            bootstrap=value[-1],
+            lambda_=_lambda,
+            axis=0,
+        )
+        # print("offical_LamR_result:",offical_LamR_result.shape) # (14, 2450)
+        # print("type3s:",type3s.shape) # (14, 2450)
 
-        type2_list.append(last_type2)
+        # import pdb
 
-        type3s = tf.concat(type2_list, 0)  # (horizon, 500)
+        # pdb.set_trace()
 
-        return type3s
+        # return type3s
+
+        return offical_LamR_result
 
     def update_dreaming(self, obs, acts, obp1s, rewards, dones, record_discounts):
         """
@@ -801,6 +822,10 @@ class Dreamer:
         actions = tf.cast(acts, tf.float32)
         rewards = tf.cast(rewards, tf.float32)
         record_discounts = tf.cast(record_discounts, tf.float32)
+
+        kl_balance = tools.schedule(self._config.kl_balance, self._step)
+        kl_free = tools.schedule(self._config.kl_free, self._step)
+        kl_scale = tools.schedule(self._config.kl_scale, self._step)
 
         with tf.GradientTape() as world_tape:
             """
@@ -852,11 +877,15 @@ class Dreamer:
 
             prior_dist = self.dynamics.get_dist(prior)
             stop_prior_dist = self.dynamics.get_dist(prior, stop_grad=True)
+
             post_dist = self.dynamics.get_dist(post)
             stop_post_dist = self.dynamics.get_dist(post, stop_grad=True)
 
             # div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
             # div = tf.maximum(div, self._c.free_nats)
+
+            mix = (1 - kl_balance)
+
 
             kl_blancing_div = self.eta_t * tf.reduce_mean(
                 tfd.kl_divergence(stop_post_dist, prior_dist)
@@ -864,23 +893,33 @@ class Dreamer:
                 tfd.kl_divergence(post_dist, stop_prior_dist)
             )
 
+            value_lhs = value = tfd.kl_divergence(post_dist, stop_prior_dist)
+            value_rhs = kld(stop_post_dist, prior_dist)
+            loss_lhs = tf.maximum(tf.reduce_mean(value_lhs), free)
+            loss_rhs = tf.maximum(tf.reduce_mean(value_rhs), free)
+            loss = mix * loss_lhs + (1 - mix) * loss_rhs
+            loss *= kl_scale
+            world_loss - loss
+
             """
             the model loss is exactly the VAE loss of world model(which is VAE sample generator)
             """
-            # world_loss = self._c.kl_scale * div - sum(
+
+            # world_loss = self._c.kl_scale * kl_blancing_div - sum(
             #     likes.values()
             # )  # like.value contains log prob of image and reward
-            world_loss = self._c.kl_scale * kl_blancing_div - sum(
-                likes.values()
-            )  # like.value contains log prob of image and reward
 
-        world_var = []
-        world_var.extend(self.encoder.trainable_variables)
-        world_var.extend(self.decoder.trainable_variables)
-        world_var.extend(self.dynamics.trainable_variables)
-        world_grads = world_tape.gradient(world_loss, world_var)
+        # world_var = []
+        # world_var.extend(self.encoder.trainable_variables)
+        # world_var.extend(self.decoder.trainable_variables)
+        # world_var.extend(self.dynamics.trainable_variables)
+        # world_grads = world_tape.gradient(world_loss, world_var)
+        world_model_parts = [self.encoder, self.decoder, self.dynamics]
 
         with tf.GradientTape() as actor_tape:
+            drop_last = lambda x: x[:, :-1, :]
+            post = {k: drop_last(v) for k, v in post.items()}
+
             # post:
             imag_feat = self.imagine_ahead(
                 post
@@ -888,35 +927,38 @@ class Dreamer:
 
             imag_action = self.actor(imag_feat).mode()
 
-            imag_action_prob = self.actor(imag_feat).log_prob(imag_action)[:-1]
-            print("imag_action_prob:",imag_action_prob) # (2499, 15)
+            imag_action_prob = self.actor(imag_feat).log_prob(imag_action)
+            print("imag_action_prob:", imag_action_prob)
 
             # print("imag_feat.shape:",imag_feat.shape) # (500, 15, 230)
             pcont = self._pcont(imag_feat).mean()
-            # print("pcont.shape:",pcont.shape) # 500, 15
+            # print("pcont.shape:",pcont.shape) # (2450, 15)
 
             lambda_returns = self.lambda_returns(
-                imag_feat, pcont, _lambda=self._c.disclam
+                imag_feat, pcont, _lambda=self._c.discount_lambda
             )  # an exponentially-weighted average of the estimates V for different k to balance bias and variance
-            # print("lambda_returns: ",lambda_returns.shape) # ( )
+            print("lambda_returns: ", lambda_returns.shape)  # ( )
 
             value_diff = tf.stop_gradient(
-                tf.transpose(lambda_returns, [1, 0])[1:] - self.critic(imag_feat[:-1]).mode())
-            
-            print("value_diff:",value_diff)
+                tf.transpose(lambda_returns, [1, 0])
+                - self.critic(imag_feat[:, :-1]).mode()
+            )
 
-            actor_loss = imag_action_prob*value_diff
+            print("value_diff:", value_diff)
 
-            mix_actor_loss = tf.transpose(lambda_returns, [1, 0])[1:] * 0.1 + (1 - 0.1)*actor_loss
+            actor_loss = imag_action_prob[:, :-1] * value_diff
 
-            actor_loss = -tf.reduce_sum(
-                mix_actor_loss 
-            )  
+            mix_actor_loss = (
+                tf.transpose(lambda_returns, [1, 0]) * 0.1 + (1 - 0.1) * actor_loss
+            )
+
+            actor_loss = -tf.reduce_sum(mix_actor_loss)
             actor_loss = tf.reduce_mean(actor_loss)
 
-        actor_var = []
-        actor_var.extend(self.actor.trainable_variables)
-        actor_grads = actor_tape.gradient(actor_loss, actor_var)
+        # actor_var = []
+        # actor_var.extend(self.actor.trainable_variables)
+        # actor_grads = actor_tape.gradient(actor_loss, actor_var)
+        actor_model_parts = [self.actor]
 
         with tf.GradientTape() as critic_tape:
 
@@ -929,7 +971,7 @@ class Dreamer:
             value_pred = self.critic(imag_feat)[:, :-1]
             # print("value_pred:",value_pred.mean().shape)
 
-            target = tf.stop_gradient(tf.transpose(lambda_returns[1:], [1, 0]))
+            target = tf.stop_gradient(tf.transpose(lambda_returns, [1, 0]))
             # print("target:", target.shape)  # (14, 1225)
             # print(
             #     "value_pred.log_prob(target).shape:", value_pred.log_prob(target).shape
@@ -938,65 +980,43 @@ class Dreamer:
                 discount * value_pred.log_prob(target)
             )  # to directy predict return. gradient is not effecting world model
 
-        critic_var = []
-        critic_var.extend(self.critic.trainable_variables)
-        critic_grads = critic_tape.gradient(critic_loss, critic_var)
+        # critic_var = []
+        # critic_var.extend(self.critic.trainable_variables)
+        # critic_grads = critic_tape.gradient(critic_loss, critic_var)
+        critic_model_parts = [self.critic]
 
-        # def get_parameters(list_of_tf_var):
-        #     count = 0
-        #     for var in list_of_tf_var:
-        #         count += np.prod(np.array(var.shape))
-        #     return count
+        # self.world_optimizer.apply_gradients(zip(world_grads, world_var))
+        # self.critic_optimizer.apply_gradients(zip(critic_grads, critic_var))
+        # self.actor_optimizer.apply_gradients(zip(actor_grads, actor_var))
 
-        # print(
-        #     "self.encoder.trainable_variables:",
-        #     get_parameters(self.encoder.trainable_variables),
-        # )
-        # print(
-        #     "self.decoder.trainable_variables:",
-        #     get_parameters(self.decoder.trainable_variables),
-        # )
-        # print(
-        #     "self.dynamics.trainable_variables:",
-        #     get_parameters(self.dynamics.trainable_variables),
-        # )
+        self.world_optimizer(world_tape,world_loss,world_model_parts)
+        self.actor_optimizer(actor_tape,actor_loss,actor_model_parts)
+        self.critic_optimizer(critic_tape,critic_loss,critic_model_parts)
 
-        # print(
-        #     "self.actor.trainable_variables:",
-        #     get_parameters(self.actor.trainable_variables),
-        # )
 
-        # print(
-        #     "self.actor.trainable_variables:",
-        #     get_parameters(self.critic.trainable_variables),
-        # )
-
-        self.world_optimizer.apply_gradients(zip(world_grads, world_var))
-        self.critic_optimizer.apply_gradients(zip(critic_grads, critic_var))
-        self.actor_optimizer.apply_gradients(zip(actor_grads, actor_var))
-        if self.total_step % 2000 == 0:
+        if self.update_step % 2000 == 0:
             self.dynamics.save_weights(self.Dreamer_dynamics_path)
             self.encoder.save_weights(self.Dreamer_encoder_path)
             self.reward_decoder.save_weights(self.Dreamer_reward_decoder_path)
             self.critic.save_weights(self.Dreamer_critic_path)
             self.actor.save_weights(self.Dreamer_actor_path)
 
-        self.total_step += 1
-        tf.summary.experimental.set_step(self.total_step)
+        self.update_step += 1
+        tf.summary.experimental.set_step(self.update_step)
 
-        if self.total_step % 20 == 0:
-            print("update finish, save summary..., now update step:", self.total_step)
+        if self.update_step % 20 == 0:
+            print("update finish, save summary..., now update step:", self.update_step)
             with self._writer.as_default():
                 tf.summary.scalar(
-                    "actor_loss/reverse_lambda_return", actor_loss, step=self.total_step
+                    "actor_loss/reverse_lambda_return", actor_loss, step=self.update_step
                 )
-                tf.summary.scalar("critic1_loss", critic_loss, step=self.total_step)
-                tf.summary.scalar("world_loss", world_loss, step=self.total_step)
+                tf.summary.scalar("critic1_loss", critic_loss, step=self.update_step)
+                tf.summary.scalar("world_loss", world_loss, step=self.update_step)
                 # tf.summary.scalar(
-                #     "average_reward", tf.reduce_mean(rewards), step=self.total_step
+                #     "average_reward", tf.reduce_mean(rewards), step=self.update_step
                 # )
 
-        if self.total_step % 2000 == 0:
+        if self.update_step % 2000 == 0:
             print("do image summaries saving!!")
             self._image_summaries(
                 {"obs": obs, "actions": actions, "obp1s": obp1s},
@@ -1022,4 +1042,4 @@ class Dreamer:
         tools.graph_summary(self._writer, tools.video_summary, "agent/openl", openl)
 
     def save_summary(self, average_reward):
-        tf.summary.scalar("average_reward", average_reward, step=self.total_step)
+        tf.summary.scalar("average_reward", average_reward, step=self.update_step)
