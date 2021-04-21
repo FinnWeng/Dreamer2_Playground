@@ -424,13 +424,7 @@ class Dreamer:
     def __init__(self, env, is_training, step, config):
 
         # define callback and set networ parameters
-        gpus = tf.config.experimental.list_physical_devices("GPU")
 
-        tf.config.experimental.set_visible_devices(gpus[1], "GPU")
-        if gpus:
-            # Currently, memory growth needs to be the same across GPUs
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
         # for discrete space, the space means kinds of choice of action. for continious, it means upper and lower bound of value.
         # so the action_dim means number of action. it is different from for discrete space, kinds of choice.
         self.env = env
@@ -516,9 +510,11 @@ class Dreamer:
         # self.actor_optimizer = tf.optimizers.Adam(self._c.actor_lr)
         # self.critic_optimizer = tf.optimizers.Adam(self._c.value_lr)
 
-        self.world_optimizer = tools.Optimizer(self._c.model_lr,self._c.opt_eps,self._c.grad_clip,self._c.weight_decay, self._c.opt)
-        self.actor_optimizer = tools.Optimizer(self._c.actor_lr,self._c.opt_eps,self._c.actor_grad_clip,self._c.weight_decay, self._c.opt)
-        self.critic_optimizer = tools.Optimizer(self._c.value_lr,self._c.opt_eps,self._c.value_grad_clip,self._c.weight_decay, self._c.opt)
+
+
+        self.world_optimizer = tools.Optimizer("world",self._c.model_lr,self._c.opt_eps,self._c.grad_clip,self._c.weight_decay, self._c.opt)
+        self.actor_optimizer = tools.Optimizer("actor",self._c.actor_lr,self._c.opt_eps,self._c.actor_grad_clip,self._c.weight_decay, self._c.opt)
+        self.critic_optimizer = tools.Optimizer("critic",self._c.value_lr,self._c.opt_eps,self._c.value_grad_clip,self._c.weight_decay, self._c.opt)
 
         self._writer = tf.summary.create_file_writer(
             "./tf_log", max_queue=1000, flush_millis=20000
@@ -682,7 +678,7 @@ class Dreamer:
         imag_feat = self.dynamics.get_feat(
             states
         )  # concate state and obs # (1225,15,  230)
-        print("imag_feat:", imag_feat.shape)
+        
 
         return imag_feat
 
@@ -823,9 +819,9 @@ class Dreamer:
         rewards = tf.cast(rewards, tf.float32)
         record_discounts = tf.cast(record_discounts, tf.float32)
 
-        kl_balance = tools.schedule(self._config.kl_balance, self._step)
-        kl_free = tools.schedule(self._config.kl_free, self._step)
-        kl_scale = tools.schedule(self._config.kl_scale, self._step)
+        kl_balance = tools.schedule(self._c.kl_balance, self._step)
+        kl_free = tools.schedule(self._c.kl_free, self._step)
+        kl_scale = tools.schedule(self._c.kl_scale, self._step)
 
         with tf.GradientTape() as world_tape:
             """
@@ -887,19 +883,19 @@ class Dreamer:
             mix = (1 - kl_balance)
 
 
-            kl_blancing_div = self.eta_t * tf.reduce_mean(
-                tfd.kl_divergence(stop_post_dist, prior_dist)
-            ) + self.eta_q * tf.reduce_mean(
-                tfd.kl_divergence(post_dist, stop_prior_dist)
-            )
+            # kl_blancing_div = self.eta_t * tf.reduce_mean(
+            #     tfd.kl_divergence(stop_post_dist, prior_dist)
+            # ) + self.eta_q * tf.reduce_mean(
+            #     tfd.kl_divergence(post_dist, stop_prior_dist)
+            # )
 
             value_lhs = value = tfd.kl_divergence(post_dist, stop_prior_dist)
-            value_rhs = kld(stop_post_dist, prior_dist)
-            loss_lhs = tf.maximum(tf.reduce_mean(value_lhs), free)
-            loss_rhs = tf.maximum(tf.reduce_mean(value_rhs), free)
+            value_rhs = tfd.kl_divergence(stop_post_dist, prior_dist)
+            loss_lhs = tf.maximum(tf.reduce_mean(value_lhs), kl_free)
+            loss_rhs = tf.maximum(tf.reduce_mean(value_rhs), kl_free)
             loss = mix * loss_lhs + (1 - mix) * loss_rhs
             loss *= kl_scale
-            world_loss - loss
+            world_loss = loss - sum(likes.values())
 
             """
             the model loss is exactly the VAE loss of world model(which is VAE sample generator)
@@ -917,6 +913,7 @@ class Dreamer:
         world_model_parts = [self.encoder, self.decoder, self.dynamics]
 
         with tf.GradientTape() as actor_tape:
+
             drop_last = lambda x: x[:, :-1, :]
             post = {k: drop_last(v) for k, v in post.items()}
 
@@ -928,32 +925,48 @@ class Dreamer:
             imag_action = self.actor(imag_feat).mode()
 
             imag_action_prob = self.actor(imag_feat).log_prob(imag_action)
-            print("imag_action_prob:", imag_action_prob)
+            # print("imag_action_prob:", imag_action_prob) # (2450, 15)
 
             # print("imag_feat.shape:",imag_feat.shape) # (500, 15, 230)
             pcont = self._pcont(imag_feat).mean()
             # print("pcont.shape:",pcont.shape) # (2450, 15)
 
+            discount = tf.stop_gradient(
+                tf.math.cumprod(
+                    tf.concat([tf.ones_like(pcont[:, :1]), pcont[:, :-2]], 1), 1
+                )
+            )  # not to effect the world model
+            # print("discount:",discount.shape) # (2450, 14)
+
             lambda_returns = self.lambda_returns(
                 imag_feat, pcont, _lambda=self._c.discount_lambda
             )  # an exponentially-weighted average of the estimates V for different k to balance bias and variance
-            print("lambda_returns: ", lambda_returns.shape)  # ( )
-
+            
             value_diff = tf.stop_gradient(
                 tf.transpose(lambda_returns, [1, 0])
                 - self.critic(imag_feat[:, :-1]).mode()
             )
 
-            print("value_diff:", value_diff)
+            # print("value_diff:", value_diff)
 
             actor_loss = imag_action_prob[:, :-1] * value_diff
 
-            mix_actor_loss = (
-                tf.transpose(lambda_returns, [1, 0]) * 0.1 + (1 - 0.1) * actor_loss
-            )
+            # print("lambda_returns: ", lambda_returns.shape)  # (14, 2450)
+            # print("actor_loss:",actor_loss.shape) # (2450, 14)
+            # print("discount:",discount.shape) # (2450, 14)
 
-            actor_loss = -tf.reduce_sum(mix_actor_loss)
-            actor_loss = tf.reduce_mean(actor_loss)
+            
+
+            actor_mix = self._c.imag_gradient_mix()
+
+            mix_actor_loss = (
+                tf.transpose(lambda_returns, [1, 0]) * actor_mix + (1 - actor_mix) * actor_loss
+            )
+            # print("mix_actor_loss:",mix_actor_loss)
+
+            # actor_loss = -tf.reduce_sum(mix_actor_loss)
+            actor_loss = tf.reduce_mean(discount*mix_actor_loss)
+            
 
         # actor_var = []
         # actor_var.extend(self.actor.trainable_variables)
@@ -962,12 +975,8 @@ class Dreamer:
 
         with tf.GradientTape() as critic_tape:
 
-            discount = tf.stop_gradient(
-                tf.math.cumprod(
-                    tf.concat([tf.ones_like(pcont[:, :1]), pcont[:, :-2]], 1), 1
-                )
-            )  # not to effect the world model
-            # print("discount:",discount.shape)
+
+            
             value_pred = self.critic(imag_feat)[:, :-1]
             # print("value_pred:",value_pred.mean().shape)
 

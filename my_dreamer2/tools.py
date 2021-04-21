@@ -247,7 +247,7 @@ def static_scan(fn, inputs, start, reverse=False):
     # (1 - lambda)  (sigma(v1*lambda**1+...+vn*lambda**n) + sigma_to_n(sigma_to_k(r*lambda**n))) + lambda* Vn+1 # two kind of sigma
 
 class Optimizer(tf.Module):
-    def __init__(self,name,lr,eps=1e-4, clip=None, wd, wd_pattern=r'.*',opt = "adam"):
+    def __init__(self,name,lr,eps=1e-4, clip=None, wd=NotImplementedError, wd_pattern=r'.*',opt = "adam"):
         self._name = name
         self._clip = clip
         self._wd = wd
@@ -276,9 +276,9 @@ class Optimizer(tf.Module):
     def _apply_weight_decay(self, varibs):
         nontrivial = (self._wd_pattern != r'.*')
         if nontrivial:
-        print('Applied weight decay to variables:')
+            print('Applied weight decay to variables:')
         for var in varibs:
-        if re.search(self._wd_pattern, self._name + '/' + var.name):
+            # if re.search(self._wd_pattern, self._name + '/' + var.name):
             if nontrivial:
-            print('- ' + self._name + '/' + var.name)
+                print('- ' + self._name + '/' + var.name)
             var.assign((1 - self._wd) * var)

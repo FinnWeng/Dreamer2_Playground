@@ -5,6 +5,7 @@ import cv2
 
 import pickle
 import utils
+import tools
 
 def count_steps(folder):
   return sum(int(str(n).split('-')[-1][:-4]) - 1 for n in folder.glob('*.npz'))
@@ -38,7 +39,7 @@ class Play:
         self.act_repeat_time = self._c.action_repeat
         self.advantage = True
 
-        self._step = tf.Variable(count_steps(config.traindir), dtype=tf.int64)
+        
         self.total_step = 1
         self.exploration_rate = 0.0  # the exploration is in dreamer_net
         self.save_play_img = False
@@ -47,8 +48,25 @@ class Play:
         self.episode_step = 1  # to avoid devide by zero
         self.horizon = 15
         self.datadir = self._c.logdir / "episodes"
-        # self._dataset = iter(self.load_dataset(self.datadir, self._c))
 
+        # self._dataset = iter(self.load_dataset(self.datadir, self._c))
+        gpus = tf.config.experimental.list_physical_devices("GPU")
+
+        tf.config.experimental.set_visible_devices(gpus[1], "GPU")
+        if gpus:
+            # Currently, memory growth needs to be the same across GPUs
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+
+        with tf.device('cpu:1'):
+            self._step = tf.Variable(count_steps(self.datadir), dtype=tf.int64)
+
+        self._c.actor_entropy = (
+            lambda x=self._c.actor_entropy: tools.schedule(x, self._step))
+        self._c.actor_state_entropy = (
+            lambda x=self._c.actor_state_entropy: tools.schedule(x, self._step))
+        self._c.imag_gradient_mix = (
+            lambda x=self._c.imag_gradient_mix: tools.schedule(x, self._step))
         self.model = model_maker(self.env, training, self._step, self._c)
 
         if training:
@@ -217,7 +235,9 @@ class Play:
                     {
                         "obs": np.array([self.ob]),
                         "obp1s": np.array([self.ob]),
-                        "rewards": 0,
+                        "rewards": 0.,
+                        "discounts":1.0,
+
                     },
                     self._c,
                 )[
@@ -277,6 +297,7 @@ class Play:
             self.episode_step += 1  # to avoid devide by zero
             self.total_step += 1
             print("self.total_step:", self.total_step)
+            print("self._step:",self._step.numpy())
 
             if prefill == True:
                 self.episode_step = 1
@@ -455,6 +476,8 @@ class Play:
         rewards_mean = self.model.update_dreaming(
             obs, actions, obp1s, rewards, dones, discounts
         )
+    
+        self._step.assign_add(len(data["dones"]))
 
         end_time = time.time()
         # print("update time = ", end_time - start_time)

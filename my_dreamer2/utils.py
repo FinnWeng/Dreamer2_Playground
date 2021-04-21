@@ -11,16 +11,18 @@ import time
 
 
 def preprocess(episode_record, config):
-    # episode_record = episode_record.copy()
+    # print("preprocess episode_record:",episode_record.keys())
     with tf.device("cpu:0"):
         episode_record["obs"] = tf.cast(episode_record["obs"], tf.float32) / 255.0 - 0.5
         episode_record["obp1s"] = (
             tf.cast(episode_record["obp1s"], tf.float32) / 255.0 - 0.5
         )
+        episode_record['rewards'] = getattr(tf, config.clip_rewards)(episode_record['rewards'])
         # clip_rewards = dict(none=lambda x: x, tanh=tf.tanh)[
         #     config.clip_rewards
         # ]  # default none
         # episode_record["rewards"] = clip_rewards(episode_record["rewards"])
+        episode_record['discounts'] *= config.discount
     return episode_record
 
 
@@ -44,7 +46,7 @@ def save_episode(directory, episode_record):
     #     k: [t[k] for t in episode_record] for k in episode_record.keys()
     # }  # list of dict to  {k: list of value}
 
-    # print("episode_record['ob']:", episode_record["ob"].shape)
+    # print("save_episode_record:", episode_record.keys())
 
     directory = pathlib.Path(directory).expanduser()
     directory.mkdir(parents=True, exist_ok=True)
@@ -142,7 +144,7 @@ def load_dataset(episodes, config):  # load data from npz
     types = {k: v.dtype for k, v in example.items()}
     
     shapes = {k: (None,) + v.shape[1:] for k, v in example.items()}
-    print("shapes:",shapes)
+    # print("shapes:",shapes)
 
     generator = lambda: sample_episodes(
         episodes, config.batch_length, config.oversample_ends,
@@ -183,42 +185,3 @@ class slices_dataset_generator:
                 self.dataset = self.reload(self.directory, self.config)
                 print("reload dataset until success!")
                 # return next(self.dataset)
-
-
-
-class Optimizer(tf.Module):
-    def __init__(self,name,lr,eps=1e-4, clip=None, wd, wd_pattern=r'.*',opt = "adam"):
-        self._name = name
-        self._clip = clip
-        self._wd = wd
-        self._wd_pattern = wd_pattern
-        self._opt = {
-            'adam': lambda: tf.optimizers.Adam(lr, epsilon=eps),
-            'nadam': lambda: tf.optimizers.Nadam(lr, epsilon=eps),
-            'adamax': lambda: tf.optimizers.Adamax(lr, epsilon=eps),
-            'sgd': lambda: tf.optimizers.SGD(lr),
-            'momentum': lambda: tf.optimizers.SGD(lr, 0.9),
-        }[opt]()
-    
-    def __call__(self, tape, loss, modules):
-        modules = modules if hasattr(modules, '__len__') else (modules,)
-        varibs = tf.nest.flatten([module.variables for module in modules])
-        grads = tape.gradient(loss, varibs)
-        norm = tf.linalg.global_norm(grads)
-        if self._clip:
-            grads, _ = tf.clip_by_global_norm(grads, self._clip, norm)
-        
-        if self._wd:
-            self._apply_weight_decay(varibs)
-        
-        self._opt.apply_gradients(zip(grads, varibs))
-    
-    def _apply_weight_decay(self, varibs):
-        nontrivial = (self._wd_pattern != r'.*')
-        if nontrivial:
-        print('Applied weight decay to variables:')
-        for var in varibs:
-        if re.search(self._wd_pattern, self._name + '/' + var.name):
-            if nontrivial:
-            print('- ' + self._name + '/' + var.name)
-            var.assign((1 - self._wd) * var)

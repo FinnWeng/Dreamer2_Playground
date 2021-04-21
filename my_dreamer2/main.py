@@ -39,7 +39,7 @@ def define_config():
     config.time_limit = 108000
     config.prefill = 50000
     config.eval_noise = 0.0
-    config.clip_rewards = "none"
+    config.clip_rewards = "tanh"
     # Model.
     config.deter_size = 800
     config.stoch_size = 32
@@ -51,7 +51,7 @@ def define_config():
     config.pcont = True
     config.free_nats = 3.0
     config.kl_scale = 1.0
-    config.pcont_scale = 1.0
+    config.pcont_scale = 5.0
     config.eta_x = 1 / (64 * 64 * 3)
     config.eta_r = 1
     config.eta_gamma = 1
@@ -59,7 +59,7 @@ def define_config():
     config.eta_q = 0.02
     config.weight_decay = 1e-6
 
-    config.actor_entropy: "linear(3e-3,3e-4,2.5e6)"
+    
     # Training.
     config.batch_size = 50
 
@@ -70,6 +70,8 @@ def define_config():
     # config.max_dataset_steps = 7 * 1e5
     config.max_dataset_steps = 1e6
     config.oversample_ends = True
+    config.opt = 'adam'
+
 
     config.pretrain = 100
     config.model_lr = 2e-4
@@ -84,11 +86,15 @@ def define_config():
     config.kl_scale = 0.1
     config.kl_free = 0.0
     # Behavior.
-    config.discount = 0.99
+    config.discount = 0.999
+    config.imag_gradient =  'both'
+    config.imag_gradient_mix = 'linear(0.1,0,2.5e6)'
     config.discount_lambda = 0.95
     config.horizon = 15
     #   config.action_dist = 'tanh_normal' # for continous action
     config.action_dist = "onehot"  # for onehot action
+    config.actor_entropy =  "linear(3e-3,3e-4,2.5e6)"
+    config.actor_state_entropy =  0.0
     config.expl_amount = 0.0
     config.action_init_std = 5.0
     #   config.expl = 'additive_gaussian'
