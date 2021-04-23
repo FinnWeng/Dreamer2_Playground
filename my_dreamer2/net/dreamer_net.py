@@ -488,6 +488,11 @@ class Dreamer:
             (), 3, self._c.num_units, act=actv
         )  # critic, no advantage
 
+        if config.slow_value_target or config.slow_actor_target:
+            self.slow_critic = ValueDecoder(
+                (), 3, self._c.num_units, act=actv)  # critic, no advantage
+            self._updates = tf.Variable(0, tf.int64)
+
         self.actor = ActionDecoder(
             self._actdim,
             4,
@@ -722,7 +727,12 @@ class Dreamer:
             img_feat
         ).mode()  # reward_pred.sample(): (25*batch_length,horizon-1)
 
-        value = self.critic(img_feat).mode()  # (25*batch_length,horizon)
+        
+        if self._c.slow_value_target == True:
+            value = self.slow_critic(img_feat).mode()  # (25*batch_length,horizon)
+        else:
+            value = self.critic(img_feat).mode()  # (25*batch_length,horizon)
+
         """
         value: (2450, 15)
         reward_pred: (2450, 15)
@@ -823,6 +833,8 @@ class Dreamer:
         kl_free = tools.schedule(self._c.kl_free, self._step)
         kl_scale = tools.schedule(self._c.kl_scale, self._step)
 
+        self._update_slow_target()
+
         with tf.GradientTape() as world_tape:
             """
             the world model, which is _dynamics(RSSM)
@@ -921,6 +933,10 @@ class Dreamer:
             imag_feat = self.imagine_ahead(
                 post
             )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
+
+            actor_ent = self.actor(imag_feat).entropy()
+            # state_ent = self._world_model.dynamics.get_dist(
+            #     imag_state, tf.float32).entropy()
 
             imag_action = self.actor(imag_feat).mode()
 
@@ -1052,3 +1068,13 @@ class Dreamer:
 
     def save_summary(self, average_reward):
         tf.summary.scalar("average_reward", average_reward, step=self.update_step)
+
+
+
+    def _update_slow_target(self):
+        if self._c.slow_value_target or self._c.slow_actor_target:
+            if self._updates % self._c.slow_target_update == 0:
+                mix = self._c.slow_target_fraction
+                for s, d in zip(self.critic.variables, self.slow_critic.variables):
+                    d.assign(mix * s + (1 - mix) * d)
+            self._updates.assign_add(1)

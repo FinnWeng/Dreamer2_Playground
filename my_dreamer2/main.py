@@ -37,7 +37,7 @@ def define_config():
     config.action_repeat = 4
     config.eval_noise = 0.0
     config.time_limit = 108000
-    config.prefill = 50000
+    config.prefill = 500
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
@@ -70,6 +70,10 @@ def define_config():
     # config.max_dataset_steps = 7 * 1e5
     config.max_dataset_steps = 1e6
     config.oversample_ends = True
+    config.slow_value_target = True
+    config.slow_actor_target = True
+    config.slow_target_update = 100
+    config.slow_target_fraction = 1
     config.opt = 'adam'
 
 
