@@ -238,15 +238,18 @@ class ValueDecoder(tf.keras.Model):
 
 
 class RSSM(tf.keras.Model):
-    def __init__(self, stoch=30, deter=200, hidden=200, act=tf.nn.elu):
+    def __init__(self, stoch=30, deter=200, hidden=200, act=tf.nn.elu, cell="gru"):
         super(RSSM, self).__init__()
         self._activation = act
         self._stoch_size = stoch
         self._deter_size = deter
         self._hidden_size = hidden
-        self._cell = tf.keras.layers.GRUCell(
-            self._deter_size
-        )  # # (output, next_state) = call(input, state)
+        if cell == "gru":
+            self._cell = tf.keras.layers.GRUCell(
+                self._deter_size
+            )  # # (output, next_state) = call(input, state)
+        elif cell == "gru_layer_norm":
+            self._cell = GRUCell(self._deter_size, norm=True)
 
     def get(self, name, ctor, *args, **kwargs):
         # Create or get layer by name to avoid mentioning it in the constructor.
@@ -470,7 +473,13 @@ class Dreamer:
         self.Dreamer_critic_path = "./model/Dreamer_critic.ckpt"
         self.Dreamer_actor_path = "./model/Dreamer_actor.ckpt"
 
-        self.dynamics = RSSM(self._c.stoch_size, self._c.deter_size, self._c.deter_size)
+        self.dynamics = RSSM(
+            self._c.stoch_size,
+            self._c.deter_size,
+            self._c.deter_size,
+            tf.nn.elu,
+            self._c.dyn_cell,
+        )
 
         self.encoder = ConvEncoder(self._c.cnn_depth, cnn_actv)
         if self._c.grayscale:
@@ -490,7 +499,8 @@ class Dreamer:
 
         if config.slow_value_target or config.slow_actor_target:
             self.slow_critic = ValueDecoder(
-                (), 3, self._c.num_units, act=actv)  # critic, no advantage
+                (), 3, self._c.num_units, act=actv
+            )  # critic, no advantage
             self._updates = tf.Variable(0, tf.int64)
 
         self.actor = ActionDecoder(
@@ -515,11 +525,30 @@ class Dreamer:
         # self.actor_optimizer = tf.optimizers.Adam(self._c.actor_lr)
         # self.critic_optimizer = tf.optimizers.Adam(self._c.value_lr)
 
-
-
-        self.world_optimizer = tools.Optimizer("world",self._c.model_lr,self._c.opt_eps,self._c.grad_clip,self._c.weight_decay, self._c.opt)
-        self.actor_optimizer = tools.Optimizer("actor",self._c.actor_lr,self._c.opt_eps,self._c.actor_grad_clip,self._c.weight_decay, self._c.opt)
-        self.critic_optimizer = tools.Optimizer("critic",self._c.value_lr,self._c.opt_eps,self._c.value_grad_clip,self._c.weight_decay, self._c.opt)
+        self.world_optimizer = tools.Optimizer(
+            "world",
+            self._c.model_lr,
+            self._c.opt_eps,
+            self._c.grad_clip,
+            self._c.weight_decay,
+            self._c.opt,
+        )
+        self.actor_optimizer = tools.Optimizer(
+            "actor",
+            self._c.actor_lr,
+            self._c.opt_eps,
+            self._c.actor_grad_clip,
+            self._c.weight_decay,
+            self._c.opt,
+        )
+        self.critic_optimizer = tools.Optimizer(
+            "critic",
+            self._c.value_lr,
+            self._c.opt_eps,
+            self._c.value_grad_clip,
+            self._c.weight_decay,
+            self._c.opt,
+        )
 
         self._writer = tf.summary.create_file_writer(
             "./tf_log", max_queue=1000, flush_millis=20000
@@ -683,7 +712,6 @@ class Dreamer:
         imag_feat = self.dynamics.get_feat(
             states
         )  # concate state and obs # (1225,15,  230)
-        
 
         return imag_feat
 
@@ -727,7 +755,6 @@ class Dreamer:
             img_feat
         ).mode()  # reward_pred.sample(): (25*batch_length,horizon-1)
 
-        
         if self._c.slow_value_target == True:
             value = self.slow_critic(img_feat).mode()  # (25*batch_length,horizon)
         else:
@@ -773,7 +800,7 @@ class Dreamer:
         #     ) + (_lambda ** (h + 1)) * to_kp1_value
         #     type3_list.append(type3)
 
-        #     type2_sum = _lambda * (type2_sum + sum_to_k_discount_reward) + to_kp_value  
+        #     type2_sum = _lambda * (type2_sum + sum_to_k_discount_reward) + to_kp_value
 
         # # type2_list.append(last_type2)
 
@@ -892,8 +919,7 @@ class Dreamer:
             # div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
             # div = tf.maximum(div, self._c.free_nats)
 
-            mix = (1 - kl_balance)
-
+            mix = 1 - kl_balance
 
             # kl_blancing_div = self.eta_t * tf.reduce_mean(
             #     tfd.kl_divergence(stop_post_dist, prior_dist)
@@ -957,7 +983,7 @@ class Dreamer:
             lambda_returns = self.lambda_returns(
                 imag_feat, pcont, _lambda=self._c.discount_lambda
             )  # an exponentially-weighted average of the estimates V for different k to balance bias and variance
-            
+
             value_diff = tf.stop_gradient(
                 tf.transpose(lambda_returns, [1, 0])
                 - self.critic(imag_feat[:, :-1]).mode()
@@ -971,18 +997,16 @@ class Dreamer:
             # print("actor_loss:",actor_loss.shape) # (2450, 14)
             # print("discount:",discount.shape) # (2450, 14)
 
-            
-
             actor_mix = self._c.imag_gradient_mix()
 
             mix_actor_loss = (
-                tf.transpose(lambda_returns, [1, 0]) * actor_mix + (1 - actor_mix) * actor_loss
+                tf.transpose(lambda_returns, [1, 0]) * actor_mix
+                + (1 - actor_mix) * actor_loss
             )
             # print("mix_actor_loss:",mix_actor_loss)
 
             # actor_loss = -tf.reduce_sum(mix_actor_loss)
-            actor_loss = tf.reduce_mean(discount*mix_actor_loss)
-            
+            actor_loss = tf.reduce_mean(discount * mix_actor_loss)
 
         # actor_var = []
         # actor_var.extend(self.actor.trainable_variables)
@@ -991,8 +1015,6 @@ class Dreamer:
 
         with tf.GradientTape() as critic_tape:
 
-
-            
             value_pred = self.critic(imag_feat)[:, :-1]
             # print("value_pred:",value_pred.mean().shape)
 
@@ -1014,10 +1036,9 @@ class Dreamer:
         # self.critic_optimizer.apply_gradients(zip(critic_grads, critic_var))
         # self.actor_optimizer.apply_gradients(zip(actor_grads, actor_var))
 
-        self.world_optimizer(world_tape,world_loss,world_model_parts)
-        self.actor_optimizer(actor_tape,actor_loss,actor_model_parts)
-        self.critic_optimizer(critic_tape,critic_loss,critic_model_parts)
-
+        self.world_optimizer(world_tape, world_loss, world_model_parts)
+        self.actor_optimizer(actor_tape, actor_loss, actor_model_parts)
+        self.critic_optimizer(critic_tape, critic_loss, critic_model_parts)
 
         if self.update_step % 2000 == 0:
             self.dynamics.save_weights(self.Dreamer_dynamics_path)
@@ -1032,9 +1053,9 @@ class Dreamer:
         if self.update_step % 20 == 0:
             print("update finish, save summary..., now update step:", self.update_step)
             with self._writer.as_default():
-                tf.summary.scalar(
-                    "actor_loss/reverse_lambda_return", actor_loss, step=self.update_step
-                )
+                tf.summary.scalar("actor_loss", actor_loss, step=self.update_step)
+                tf.summary.scalar("imag_gradient_mix", actor_mix, step=self.update_step)
+
                 tf.summary.scalar("critic1_loss", critic_loss, step=self.update_step)
                 tf.summary.scalar("world_loss", world_loss, step=self.update_step)
                 # tf.summary.scalar(
@@ -1067,9 +1088,9 @@ class Dreamer:
         tools.graph_summary(self._writer, tools.video_summary, "agent/openl", openl)
 
     def save_summary(self, average_reward):
-        tf.summary.scalar("average_reward", average_reward, step=self.update_step)
-
-
+        tf.summary.scalar(
+            "average_reward/train_return", average_reward, step=self.update_step
+        )
 
     def _update_slow_target(self):
         if self._c.slow_value_target or self._c.slow_actor_target:
@@ -1078,3 +1099,36 @@ class Dreamer:
                 for s, d in zip(self.critic.variables, self.slow_critic.variables):
                     d.assign(mix * s + (1 - mix) * d)
             self._updates.assign_add(1)
+
+
+class GRUCell(tf.keras.layers.AbstractRNNCell):
+    def __init__(self, size, norm=False, act=tf.tanh, update_bias=-1, **kwargs):
+        super().__init__()
+        self._size = size
+        self._act = act
+        self._norm = norm
+        self._update_bias = update_bias
+        self._layer = tf.keras.layers.Dense(
+            3 * size, use_bias=norm is not None, **kwargs
+        )
+        if norm:
+            self._norm = tf.keras.layers.LayerNormalization(dtype=tf.float32)
+
+    @property
+    def state_size(self):
+        return self._size
+
+    def call(self, inputs, state):
+        state = state[0]  # Keras wraps the state in a list.
+        parts = self._layer(tf.concat([inputs, state], -1))
+        if self._norm:
+            dtype = parts.dtype
+            parts = tf.cast(parts, tf.float32)
+            parts = self._norm(parts)
+            parts = tf.cast(parts, dtype)
+        reset, cand, update = tf.split(parts, 3, -1)
+        reset = tf.nn.sigmoid(reset)
+        cand = self._act(reset * cand)
+        update = tf.nn.sigmoid(update + self._update_bias)
+        output = update * cand + (1 - update) * state
+        return output, [output]

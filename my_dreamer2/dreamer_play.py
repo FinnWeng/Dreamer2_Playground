@@ -7,8 +7,9 @@ import pickle
 import utils
 import tools
 
+
 def count_steps(folder):
-  return sum(int(str(n).split('-')[-1][:-4]) - 1 for n in folder.glob('*.npz'))
+    return sum(int(str(n).split("-")[-1][:-4]) - 1 for n in folder.glob("*.npz"))
 
 
 class Play:
@@ -16,7 +17,7 @@ class Play:
         self.env = env
 
         # self.act_space = self.env.action_space
-        
+
         self._c = config
         self.env.reset()
         # self.ob, _, _, _ = self.env.step(
@@ -39,7 +40,6 @@ class Play:
         self.act_repeat_time = self._c.action_repeat
         self.advantage = True
 
-        
         self.total_step = 1
         self.exploration_rate = 0.0  # the exploration is in dreamer_net
         self.save_play_img = False
@@ -58,15 +58,18 @@ class Play:
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
 
-        with tf.device('cpu:1'):
+        with tf.device("cpu:1"):
             self._step = tf.Variable(count_steps(self.datadir), dtype=tf.int64)
 
-        self._c.actor_entropy = (
-            lambda x=self._c.actor_entropy: tools.schedule(x, self._step))
+        self._c.actor_entropy = lambda x=self._c.actor_entropy: tools.schedule(
+            x, self._step
+        )
         self._c.actor_state_entropy = (
-            lambda x=self._c.actor_state_entropy: tools.schedule(x, self._step))
-        self._c.imag_gradient_mix = (
-            lambda x=self._c.imag_gradient_mix: tools.schedule(x, self._step))
+            lambda x=self._c.actor_state_entropy: tools.schedule(x, self._step)
+        )
+        self._c.imag_gradient_mix = lambda x=self._c.imag_gradient_mix: tools.schedule(
+            x, self._step
+        )
         self.model = model_maker(self.env, training, self._step, self._c)
 
         if training:
@@ -227,7 +230,7 @@ class Play:
             # while True:
             if using_random_policy:
                 act = self.model.random_policy()[0].numpy()  # to get batch dim
-                print("act:",act)
+                print("act:", act)
 
             else:
 
@@ -235,9 +238,8 @@ class Play:
                     {
                         "obs": np.array([self.ob]),
                         "obp1s": np.array([self.ob]),
-                        "rewards": 0.,
-                        "discounts":1.0,
-
+                        "rewards": 0.0,
+                        "discounts": 1.0,
                     },
                     self._c,
                 )[
@@ -296,8 +298,8 @@ class Play:
             self.episode_reward += reward
             self.episode_step += 1  # to avoid devide by zero
             self.total_step += 1
-            print("self.total_step:", self.total_step)
-            print("self._step:",self._step.numpy())
+            # print("self.total_step:", self.total_step)
+            print("self._step:", self._step.numpy())
 
             if prefill == True:
                 self.episode_step = 1
@@ -377,7 +379,7 @@ class Play:
             episode_record = []
             tuple_of_episode_columns = self.TD_dict_to_TD_train_data(
                 self.play_records, True
-            ) # for Dreamer, the TD = 1
+            )  # for Dreamer, the TD = 1
 
             dict_of_episode_record = {
                 "obs": tuple_of_episode_columns[0],
@@ -395,6 +397,11 @@ class Play:
                 tf.summary.scalar(
                     "episode_reward",
                     tf.reduce_sum(tuple_of_episode_columns[3]),
+                    step=self.total_step * self.act_repeat_time,
+                )  # control by model.total_step, record the env total step
+                tf.summary.scalar(
+                    "length",
+                    len(tuple_of_episode_columns[3]) - 1,
                     step=self.total_step * self.act_repeat_time,
                 )  # control by model.total_step, record the env total step
 
@@ -476,7 +483,7 @@ class Play:
         rewards_mean = self.model.update_dreaming(
             obs, actions, obp1s, rewards, dones, discounts
         )
-    
+
         self._step.assign_add(len(data["dones"]))
 
         end_time = time.time()
@@ -613,7 +620,7 @@ class Play:
                 break
 
     def reset_total_step(self):
-        '''
+        """
         When prefill end, call this function
-        '''
+        """
         self.total_step = 1

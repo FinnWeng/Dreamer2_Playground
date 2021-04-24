@@ -31,19 +31,24 @@ def define_config():
     config.task = "atari_Breakout"
     #   config.task = 'atari_SpaceInvaders'
     config.is_discrete = True
-    config.grayscale = False
+    config.grayscale = True
     config.envs = 1
     config.parallel = "none"
     config.action_repeat = 4
     config.eval_noise = 0.0
     config.time_limit = 108000
-    config.prefill = 500
+    config.prefill = 50000
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
-    config.deter_size = 800
+    # config.dyn_cell = "gru_layer_norm"
+    config.dyn_cell = "gru"
+    config.deter_size = 600
     config.stoch_size = 32
-    config.num_units = 400
+    config.num_units = 600
+    # config.dyn_stoch = 32
+    # config.dyn_deter = 600
+    # config.dyn_hidden = 600
     config.dense_act = "elu"
     config.cnn_act = "relu"
     config.cnn_depth = 48
@@ -59,7 +64,6 @@ def define_config():
     config.eta_q = 0.02
     config.weight_decay = 1e-6
 
-    
     # Training.
     config.batch_size = 50
 
@@ -74,8 +78,7 @@ def define_config():
     config.slow_actor_target = True
     config.slow_target_update = 100
     config.slow_target_fraction = 1
-    config.opt = 'adam'
-
+    config.opt = "adam"
 
     config.pretrain = 100
     config.model_lr = 2e-4
@@ -91,14 +94,14 @@ def define_config():
     config.kl_free = 0.0
     # Behavior.
     config.discount = 0.999
-    config.imag_gradient =  'both'
-    config.imag_gradient_mix = 'linear(0.1,0,2.5e6)'
+    config.imag_gradient = "both"
+    config.imag_gradient_mix = "linear(0.1,0,2.5e6)"
     config.discount_lambda = 0.95
     config.horizon = 15
     #   config.action_dist = 'tanh_normal' # for continous action
     config.action_dist = "onehot"  # for onehot action
-    config.actor_entropy =  "linear(3e-3,3e-4,2.5e6)"
-    config.actor_state_entropy =  0.0
+    config.actor_entropy = "linear(3e-3,3e-4,2.5e6)"
+    config.actor_state_entropy = 0.0
     config.expl_amount = 0.0
     config.action_init_std = 5.0
     #   config.expl = 'additive_gaussian'
@@ -123,8 +126,6 @@ if __name__ == "__main__":
     config = define_config()
 
     wrapped_gym = Gym_Wrapper(_env, True, config.grayscale)
-
-    config_dreamer = functools.partial(Dreamer, config=config)
 
     play_process = dreamer_play.Play(wrapped_gym, Dreamer, config)
 

@@ -246,39 +246,49 @@ def static_scan(fn, inputs, start, reverse=False):
     # Vn = sigma(r) + vn
     # (1 - lambda)  (sigma(v1*lambda**1+...+vn*lambda**n) + sigma_to_n(sigma_to_k(r*lambda**n))) + lambda* Vn+1 # two kind of sigma
 
+
 class Optimizer(tf.Module):
-    def __init__(self,name,lr,eps=1e-4, clip=None, wd=NotImplementedError, wd_pattern=r'.*',opt = "adam"):
+    def __init__(
+        self,
+        name,
+        lr,
+        eps=1e-4,
+        clip=None,
+        wd=NotImplementedError,
+        wd_pattern=r".*",
+        opt="adam",
+    ):
         self._name = name
         self._clip = clip
         self._wd = wd
         self._wd_pattern = wd_pattern
         self._opt = {
-            'adam': lambda: tf.optimizers.Adam(lr, epsilon=eps),
-            'nadam': lambda: tf.optimizers.Nadam(lr, epsilon=eps),
-            'adamax': lambda: tf.optimizers.Adamax(lr, epsilon=eps),
-            'sgd': lambda: tf.optimizers.SGD(lr),
-            'momentum': lambda: tf.optimizers.SGD(lr, 0.9),
+            "adam": lambda: tf.optimizers.Adam(lr, epsilon=eps),
+            "nadam": lambda: tf.optimizers.Nadam(lr, epsilon=eps),
+            "adamax": lambda: tf.optimizers.Adamax(lr, epsilon=eps),
+            "sgd": lambda: tf.optimizers.SGD(lr),
+            "momentum": lambda: tf.optimizers.SGD(lr, 0.9),
         }[opt]()
-    
+
     def __call__(self, tape, loss, modules):
-        modules = modules if hasattr(modules, '__len__') else (modules,)
+        modules = modules if hasattr(modules, "__len__") else (modules,)
         varibs = tf.nest.flatten([module.variables for module in modules])
         grads = tape.gradient(loss, varibs)
         norm = tf.linalg.global_norm(grads)
         if self._clip:
             grads, _ = tf.clip_by_global_norm(grads, self._clip, norm)
-        
+
         if self._wd:
             self._apply_weight_decay(varibs)
-        
+
         self._opt.apply_gradients(zip(grads, varibs))
-    
+
     def _apply_weight_decay(self, varibs):
-        nontrivial = (self._wd_pattern != r'.*')
+        nontrivial = self._wd_pattern != r".*"
         if nontrivial:
-            print('Applied weight decay to variables:')
+            print("Applied weight decay to variables:")
         for var in varibs:
-            # if re.search(self._wd_pattern, self._name + '/' + var.name):
-            if nontrivial:
-                print('- ' + self._name + '/' + var.name)
+            # # if re.search(self._wd_pattern, self._name + '/' + var.name):
+            # if nontrivial:
+            #     print("- " + self._name + "/" + var.name)
             var.assign((1 - self._wd) * var)
