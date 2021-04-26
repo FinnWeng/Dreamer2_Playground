@@ -273,6 +273,8 @@ class Play:
 
             ob, reward, done, info = self.act_repeat(self.env, argmax_act[0])
 
+            self._step.assign_add(1)
+
             trainsaction = {
                 "ob": self.ob,
                 "obp1": ob,
@@ -397,12 +399,12 @@ class Play:
                 tf.summary.scalar(
                     "episode_reward",
                     tf.reduce_sum(tuple_of_episode_columns[3]),
-                    step=self.total_step * self.act_repeat_time,
+                    step=self._step.numpy() * self._c.action_repeat,
                 )  # control by model.total_step, record the env total step
                 tf.summary.scalar(
                     "length",
                     len(tuple_of_episode_columns[3]) - 1,
-                    step=self.total_step * self.act_repeat_time,
+                    step=self._step.numpy() * self._c.action_repeat,
                 )  # control by model.total_step, record the env total step
 
             self.post_process_episodes(self.episodes, filename, dict_of_episode_record)
@@ -484,7 +486,7 @@ class Play:
             obs, actions, obp1s, rewards, dones, discounts
         )
 
-        self._step.assign_add(len(data["dones"]))
+        # self._step.assign_add(len(data["dones"]))
 
         end_time = time.time()
         # print("update time = ", end_time - start_time)

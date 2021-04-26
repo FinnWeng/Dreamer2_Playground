@@ -43,14 +43,14 @@ def define_config():
     # Model.
     # config.dyn_cell = "gru_layer_norm"
     config.dyn_cell = "gru"
-    config.deter_size = 600
+    config.deter_size = 800
     config.stoch_size = 32
-    config.num_units = 600
+    config.num_units = 400
     # config.dyn_stoch = 32
     # config.dyn_deter = 600
     # config.dyn_hidden = 600
     config.dense_act = "elu"
-    config.cnn_act = "relu"
+    config.cnn_act = "elu"
     config.cnn_depth = 48
     #   config.pcont = False
     config.pcont = True

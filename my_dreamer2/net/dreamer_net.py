@@ -1053,11 +1053,27 @@ class Dreamer:
         if self.update_step % 20 == 0:
             print("update finish, save summary..., now update step:", self.update_step)
             with self._writer.as_default():
-                tf.summary.scalar("actor_loss", actor_loss, step=self.update_step)
-                tf.summary.scalar("imag_gradient_mix", actor_mix, step=self.update_step)
+                tf.summary.scalar(
+                    "actor_loss",
+                    actor_loss,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "imag_gradient_mix",
+                    actor_mix,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
 
-                tf.summary.scalar("critic1_loss", critic_loss, step=self.update_step)
-                tf.summary.scalar("world_loss", world_loss, step=self.update_step)
+                tf.summary.scalar(
+                    "critic1_loss",
+                    critic_loss,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "world_loss",
+                    world_loss,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
                 # tf.summary.scalar(
                 #     "average_reward", tf.reduce_mean(rewards), step=self.update_step
                 # )
