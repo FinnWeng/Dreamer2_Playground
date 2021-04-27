@@ -41,8 +41,8 @@ def define_config():
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
-    # config.dyn_cell = "gru_layer_norm"
-    config.dyn_cell = "gru"
+    config.dyn_cell = "gru_layer_norm"
+    # config.dyn_cell = "gru"
     config.deter_size = 800
     config.stoch_size = 32
     config.num_units = 400
@@ -105,7 +105,7 @@ def define_config():
     config.action_init_std = 5.0
     #   config.expl = 'additive_gaussian'
     config.expl = "epsilon_greedy"
-    config.expl_amount = 0.3
+    config.expl_amount = 0.0
     config.expl_decay = 0.0
     config.expl_min = 0.0
     return config
