@@ -269,7 +269,7 @@ class RSSM(tf.keras.Model):
         # )  # zero initialization, float32
         dtype = tf.float32
         return dict(
-            prob_vector=tf.zeros([batch_size, 32, self._stoch_size], dtype),
+            logit_vector=tf.zeros([batch_size, 32, self._stoch_size], dtype),
             stoch=tf.zeros([batch_size, 32 * self._stoch_size], dtype),
             deter=self._cell.get_initial_state(None, batch_size, dtype),
         )  # zero initialization, float32
@@ -289,10 +289,10 @@ class RSSM(tf.keras.Model):
         #     return tfd.MultivariateNormalDiag(state["mean"], state["std"])
         """
         if stop_grad:
-            return tfd.OneHotCategorical(tf.stop_gradient(state["prob_vector"]))
+            return tfd.Independent(tfd.OneHotCategorical(tf.stop_gradient(state["logit_vector"])),1)
 
         else:
-            return tfd.OneHotCategorical(state["prob_vector"])
+            return tfd.Independent(tfd.OneHotCategorical(state["logit_vector"]),1)
 
     @tf.function
     def img_step(self, prev_state, prev_action):
@@ -327,21 +327,15 @@ class RSSM(tf.keras.Model):
         x = self.get("img5", tf.keras.layers.Dense, 32 * self._stoch_size, None)(
             x
         )  # =>(25, 32* _stoch_size)
-        x = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
-
-        # mean, std = tf.split(
-        #     x, 2, -1
-        # )  # =>(25, 30), =>(25, 30) or =>(1250, 30), =>(1250, 30), the 1250 is 25*50 since the flatten function of imagine head
-        # std = tf.nn.softplus(std) + 0.1
-        # stoch = self.get_dist({"mean": mean, "std": std}).sample()
-        # prior = {"mean": mean, "std": std, "stoch": stoch, "deter": deter}
-
+        logit_vector = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
         prob_vector = tf.keras.layers.Softmax()(
-            x
+            logit_vector
         )  # (25, 32,  _stoch_size), which means 32 distinct categorical distibution
 
+  
+
         stoch = tf.cast(
-            self.get_dist({"prob_vector": prob_vector}).sample(), tf.float32
+            self.get_dist({"logit_vector": logit_vector}).sample(), tf.float32
         )
         # print("stoch:", stoch.shape)  # (25, 32 , _stoch_size), one hot vectors
 
@@ -357,7 +351,7 @@ class RSSM(tf.keras.Model):
         stoch is sample from distribution decided by deter, which is stochastic.
         """
 
-        prior = {"prob_vector": prob_vector, "stoch": stoch, "deter": deter}
+        prior = {"logit_vector": logit_vector, "stoch": stoch, "deter": deter}
         return prior
 
     @tf.function
@@ -378,13 +372,14 @@ class RSSM(tf.keras.Model):
         )(x)
         x = self.get("obs3", tf.keras.layers.Dense, 32 * self._stoch_size, None)(x)
         # print("x:", x.shape)
-        x = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
+        logit_vector = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
         prob_vector = tf.keras.layers.Softmax()(
-            x
+            logit_vector
         )  # (25, 32,  _stoch_size), which means 32 distinct categorical distibution
 
+
         stoch = tf.cast(
-            self.get_dist({"prob_vector": prob_vector}).sample(), tf.float32
+            self.get_dist({"logit_vector": logit_vector}).sample(), tf.float32
         )
         """
         Straight-Through Gradients trick
@@ -392,7 +387,7 @@ class RSSM(tf.keras.Model):
         stoch = stoch + prob_vector - tf.stop_gradient(prob_vector)
         stoch = tf.keras.layers.Flatten()(stoch)  # # (25, 32*_stoch_size)
 
-        post = {"prob_vector": prob_vector, "stoch": stoch, "deter": prior["deter"]}
+        post = {"logit_vector": logit_vector, "stoch": stoch, "deter": prior["deter"]}
         return post, prior
 
     @tf.function
@@ -709,11 +704,21 @@ class Dreamer:
             img_step_fresh_action, start, control_array
         )  # each is (batch_length*batch_length, horizon, 30)
 
+        # start_state: {'logit_vector': <tf.Tensor: shape=(50, 49, 32, 32)
+        # states" 'logit_vector': <tf.Tensor: shape=(2450, 15, 32, 32)
+
+
+
+
         imag_feat = self.dynamics.get_feat(
             states
         )  # concate state and obs # (1225,15,  230)
 
-        return imag_feat
+        start_state_logit_vector = tf.reshape(start_state["logit_vector"],[-1,1,32,self._c.stoch_size])
+        imag_states = {'logit_vector': tf.concat([start_state_logit_vector, states['logit_vector'][:,:-1]], 1)} # post concat prior
+
+
+        return imag_feat, imag_states
 
     def official_lambda_return(self, reward, value, pcont, bootstrap, lambda_, axis):
         # Setting lambda=1 gives a discounted Monte Carlo return.
@@ -741,7 +746,7 @@ class Dreamer:
             returns = tf.transpose(returns, dims)
         return returns
 
-    def lambda_returns(self, img_feat, pcont, _lambda):
+    def lambda_returns(self, img_feat, pcont, _lambda, actor_ent, state_ent):
         """
         it is extend from imagine_ahead
         there're three type of value estimation for imagine steps:
@@ -805,6 +810,13 @@ class Dreamer:
         # # type2_list.append(last_type2)
 
         # type3s = tf.concat(type3_list, 0)  # (horizon, 500)
+
+        if self._c.future_entropy and tf.greater(self._c.actor_entropy(), 0):
+            reward_pred += self._config.actor_entropy() * actor_ent
+        if self._c.future_entropy and tf.greater(
+            self._c.actor_state_entropy(), 0
+        ):
+            reward_pred += self._c.actor_state_entropy() * state_ent
 
         offical_LamR_result = self.official_lambda_return(
             reward_pred[:-1],
@@ -956,17 +968,20 @@ class Dreamer:
             post = {k: drop_last(v) for k, v in post.items()}
 
             # post:
-            imag_feat = self.imagine_ahead(
+            imag_feat, imag_state = self.imagine_ahead(
                 post
             )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
 
-            actor_ent = self.actor(imag_feat).entropy()
-            # state_ent = self._world_model.dynamics.get_dist(
-            #     imag_state, tf.float32).entropy()
+            actor_inp = tf.stop_gradient(imag_feat) if self._c.behavior_stop_grad else imag_feat
+            policy = self.actor(actor_inp)
+
+            actor_ent = policy.entropy() # (2450, 15)
+            state_ent = self.dynamics.get_dist(imag_state).entropy() # (2450, 15, 32)
+
 
             imag_action = self.actor(imag_feat).mode()
 
-            imag_action_prob = self.actor(imag_feat).log_prob(imag_action)
+            imag_action_prob = policy.log_prob(imag_action)
             # print("imag_action_prob:", imag_action_prob) # (2450, 15)
 
             # print("imag_feat.shape:",imag_feat.shape) # (500, 15, 230)
@@ -981,7 +996,7 @@ class Dreamer:
             # print("discount:",discount.shape) # (2450, 14)
 
             lambda_returns = self.lambda_returns(
-                imag_feat, pcont, _lambda=self._c.discount_lambda
+                imag_feat, pcont, _lambda=self._c.discount_lambda,actor_ent = actor_ent, state_ent= state_ent
             )  # an exponentially-weighted average of the estimates V for different k to balance bias and variance
 
             value_diff = tf.stop_gradient(
@@ -1003,9 +1018,17 @@ class Dreamer:
                 tf.transpose(lambda_returns, [1, 0]) * actor_mix
                 + (1 - actor_mix) * actor_loss
             )
-            # print("mix_actor_loss:",mix_actor_loss)
+            print("mix_actor_loss:",mix_actor_loss) # (2450, 14)
 
-            # actor_loss = -tf.reduce_sum(mix_actor_loss)
+            if not self._c.future_entropy and tf.greater(
+                self._c.actor_entropy(), 0
+                ):
+                mix_actor_loss += self._c.actor_entropy() * actor_ent[:,:-1]
+            if not self._c.future_entropy and tf.greater(
+                self._c.actor_state_entropy(), 0
+                ):
+                mix_actor_loss += self._c.actor_state_entropy() * state_ent[:-1]
+            
             actor_loss = tf.reduce_mean(discount * mix_actor_loss)
 
         # actor_var = []
@@ -1056,6 +1079,11 @@ class Dreamer:
                 tf.summary.scalar(
                     "actor_loss",
                     actor_loss,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "actor_ent",
+                    tf.reduce_mean(actor_ent),
                     step=self._step.numpy() * self._c.action_repeat,
                 )
                 tf.summary.scalar(

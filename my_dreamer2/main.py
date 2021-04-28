@@ -27,7 +27,6 @@ def define_config():
     config.gpu_growth = True
     config.precision = 16
     # Environment.
-    #   config.task = 'dmc_walker_walk'
     config.task = "atari_Breakout"
     #   config.task = 'atari_SpaceInvaders'
     config.is_discrete = True
@@ -41,8 +40,8 @@ def define_config():
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
-    config.dyn_cell = "gru_layer_norm"
-    # config.dyn_cell = "gru"
+    # config.dyn_cell = "gru_layer_norm"
+    config.dyn_cell = "gru"
     config.deter_size = 800
     config.stoch_size = 32
     config.num_units = 400
@@ -101,13 +100,14 @@ def define_config():
     config.action_dist = "onehot"  # for onehot action
     config.actor_entropy = "linear(3e-3,3e-4,2.5e6)"
     config.actor_state_entropy = 0.0
-    config.expl_amount = 0.0
+  
     config.action_init_std = 5.0
     #   config.expl = 'additive_gaussian'
     config.expl = "epsilon_greedy"
     config.expl_amount = 0.0
-    config.expl_decay = 0.0
-    config.expl_min = 0.0
+    config.behavior_stop_grad = True
+    config.future_entropy =  False
+
     return config
 
 
