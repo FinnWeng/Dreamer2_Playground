@@ -4,15 +4,43 @@ import numpy as np
 
 
 class Gym_Wrapper:
-    def __init__(self, env, _isDiscrete, grayscale=True):
-        self._env = env
-        self._isDiscrete = _isDiscrete
-        self._grayscale = grayscale
+    def __init__(
+        self,
+        name,
+        action_repeat=4,
+        size=(84, 84),
+        grayscale=True,
+        noops=30,
+        life_done=False,
+        sticky_actions=True,
+        all_actions=False,
+    ):
+
         self.crop_size = (160, 160)
         self.resize_size = (64, 64)
         self._actionRepeat = 4
         self._observation = []
         # self.action_space = self._env.action_space
+        import gym.wrappers
+        import gym.envs.atari
+
+        env = gym.envs.atari.AtariEnv(
+            game=name,
+            obs_type="image",
+            frameskip=1,
+            repeat_action_probability=0.25 if sticky_actions else 0.0,
+            full_action_space=all_actions,
+        )
+        # Avoid unnecessary rendering in inner env.
+        env._get_obs = lambda: None
+        # Tell wrapper that the inner env has no action repeat.
+        env.spec = gym.envs.registration.EnvSpec("NoFrameskip-v0")
+        env = gym.wrappers.AtariPreprocessing(
+            env, noops, self._actionRepeat, size[0], life_done, grayscale
+        )
+        self._env = env
+        self._grayscale = grayscale
+
         self.action_dim = self._env.action_space.n
         self.observation_space = self._env.observation_space
         # print("self.action_space.n:", self.action_space.n)
@@ -20,20 +48,12 @@ class Gym_Wrapper:
         self.shape = self._env.observation_space.shape[:2] + (
             () if self._grayscale else (3,)
         )
-        self._buffers = [
-            np.empty(self.shape, dtype=np.uint8) for _ in range(2)
-        ]  # to save observation to gray scale or others. Not replay buffer.
 
-
-
-    
     @property
     def action_space(self):
         shape = (self._env.action_space.n,)
         space = gym.spaces.Box(low=0, high=1, shape=shape, dtype=np.float32)
-        self._mask = np.logical_and(
-            np.isfinite(space.low),
-            np.isfinite(space.high))
+        self._mask = np.logical_and(np.isfinite(space.low), np.isfinite(space.high))
         self._low = np.where(self._mask, space.low, -1)
         self._high = np.where(self._mask, space.high, 1)
         low = np.where(self._mask, -np.ones_like(self._low), self._low)
@@ -47,44 +67,28 @@ class Gym_Wrapper:
         return ob
 
     def reset(self):
-        self._env.reset()
+
+        image = self._env.reset()
         if self._grayscale:
-            self._env.ale.getScreenGrayscale(self._buffers[0])
-        else:
-            self._env.ale.getScreenRGB2(self._buffers[0])
-        self._buffers[1].fill(0)
+            image = image[..., None]
+        return image
 
     def step(self, action):
-        # for my version, I don't deal with repeat in gtm wrapper
+        # for my version, I don't deal with repeat in gtm wrapper'
         # ob, reward, done, info = self._env(action)
 
         ob, reward, done, _ = self._env.step(action)
 
         if self._grayscale:
-            self._env.ale.getScreenGrayscale(self._buffers[0])
-            # ob = ob[:, :, :1]
-            ob = self._buffers[0]
-            ob = ob[:, :, None] if self._grayscale else ob
-            ob = self.crop_ob(ob)  # (160, 160, 1)
-            ob = cv2.resize(ob, self.resize_size)  # (84, 84)
-            ob = np.expand_dims(ob, axis=-1)  # (84, 84, 1)
-        else:
-            # self._env.ale.getScreenGrayscale(self._buffers[0])
-            self._env.ale.getScreenRGB2(self._buffers[0])
-            # ob = ob[:, :, :1]
-            ob = self._buffers[0]
-            ob = ob[:, :, None] if self._grayscale else ob
-            ob = self.crop_ob(ob)  # (160, 160, 1)
-            ob = cv2.resize(ob, self.resize_size)  # (84, 84)
+            ob = ob[..., None]
 
         return ob, reward, done, _
 
     # def render(self, mode="rgb_array"):
     #     return self._env.render(mode)
-    
+
     def render(self, mode="rgb_array"):
         return self._env.render()
-    
 
 
 if __name__ == "__main__":

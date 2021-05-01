@@ -27,8 +27,9 @@ def define_config():
     config.gpu_growth = True
     config.precision = 16
     # Environment.
-    config.task = "atari_Breakout"
+    config.task = "breakout"
     #   config.task = 'atari_SpaceInvaders'
+    config.size = [64, 64]
     config.is_discrete = True
     config.grayscale = True
     config.envs = 1
@@ -100,31 +101,30 @@ def define_config():
     config.action_dist = "onehot"  # for onehot action
     config.actor_entropy = "linear(3e-3,3e-4,2.5e6)"
     config.actor_state_entropy = 0.0
-  
+
     config.action_init_std = 5.0
     #   config.expl = 'additive_gaussian'
     config.expl = "epsilon_greedy"
     config.expl_amount = 0.0
     config.behavior_stop_grad = True
-    config.future_entropy =  False
+    config.future_entropy = False
 
     return config
 
 
 if __name__ == "__main__":
 
-    task = "atari_Breakout"
-    suite, task = task.split("_", 1)
-    sticky_actions = True
-    version = 0 if sticky_actions else 4
-
-    name = "".join(word.title() for word in task.split("_"))
-
-    _env = gym.make("{}NoFrameskip-v{}".format(name, version))
-
     config = define_config()
 
-    wrapped_gym = Gym_Wrapper(_env, True, config.grayscale)
+    wrapped_gym = Gym_Wrapper(
+        config.task,
+        config.action_repeat,
+        config.size,
+        grayscale=config.grayscale,
+        life_done=False and (mode == "train"),
+        sticky_actions=True,
+        all_actions=True,
+    )
 
     play_process = dreamer_play.Play(wrapped_gym, Dreamer, config)
 

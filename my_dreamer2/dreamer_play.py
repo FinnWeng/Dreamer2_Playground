@@ -19,13 +19,12 @@ class Play:
         # self.act_space = self.env.action_space
 
         self._c = config
-        self.env.reset()
+
         # self.ob, _, _, _ = self.env.step(
-        #     [0]
+        #     self.env._env.action_space.sample()
         # )  # whether it is discrete or not, 0 is proper
-        self.ob, _, _, _ = self.env.step(
-            self.env._env.action_space.sample()
-        )  # whether it is discrete or not, 0 is proper
+        self.ob = self.env.reset()
+        print("self.ob:", self.ob.shape)
         acts = self.env.action_space
 
         self._c.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
@@ -116,24 +115,11 @@ class Play:
         #     # cv2.destroyAllWindows()
 
     def act_repeat(self, env, act, rendering=False):
-        collect_reward = 0
-        for _ in range(self.act_repeat_time):
-            ob, reward, done, info = self.env.step(act)
-            # if rendering:
-            #     self.env.render(mode='human')
-            # rgb_array = self.env.render()
-            # rgb_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
-            # cv2.imshow("gameplay", rgb_array)
-            # cv2.waitKey(1)
-            # if done:
-            #     cv2.destroyAllWindows()
-            collect_reward += reward
-            if done:
-                break
+        ob, reward, done, info = self.env.step(act)
         if rendering:
             rgb_array = self.env.render()
 
-        return ob, collect_reward, done, info
+        return ob, reward, done, info
 
     def TD_dict_to_TD_train_data(self, batch_data, advantage=False):
         # list of dict of batch_size,TD_size,{4}
@@ -217,7 +203,7 @@ class Play:
             "discount": np.array(1.0),
         }
 
-        episode_record = [trainsaction]
+        episode_record = []
         """
         I call this episode_record since when there's a done for playing, I must end collecting data for 
         capturing the end score of an episode, not to mix with next episode start when doing TD.
@@ -271,7 +257,9 @@ class Play:
             #     self.RGB_array_list = []
             #     self.save_play_img = False
 
-            ob, reward, done, info = self.act_repeat(self.env, argmax_act[0])
+            ob, reward, done, info = self.act_repeat(
+                self.env, argmax_act[0]
+            )  # no repear any more
 
             self._step.assign_add(1)
 
@@ -285,6 +273,13 @@ class Play:
                     1 - float(done)
                 ),  # it means when done, discount = 1, else 0.
             }  # ob+1(obp1) for advantage method
+
+            # if self.episode_step < 50000:
+            if self.episode_step >= self._c.time_limit == 0:
+                print("pre-set!")
+                done = True
+                trainsaction["done"] = done
+                trainsaction["discount"] = 1.0
 
             episode_record.append(trainsaction)
             # print(
@@ -314,17 +309,13 @@ class Play:
                 else:
                     pass
 
-            # if self.episode_step < 50000:
-            if self.episode_step % self._c.time_limit == 0:
-                print("pre-set!")
-                done = True
-
             if done:
                 print("game done!!")
-                self.env.reset()
-                self.ob, _, _, _ = self.env.step(
-                    self.env._env.action_space.sample()
-                )  # whether it is discrete or not, 0 is proper
+                # self.env.reset()
+                # self.ob, _, _, _ = self.env.step(
+                #     self.env._env.action_space.sample()
+                # )  # whether it is discrete or not, 0 is proper
+                self.ob = self.env.reset()
 
                 average_reward = self.episode_reward / self.episode_step
 
@@ -351,7 +342,7 @@ class Play:
                         "done": 0,
                         "discount": np.array(1.0),
                     }  # ob+1(obp1) for advantage method
-                    episode_record = [trainsaction]
+                    episode_record = []
                     if not must_be_whole_episode:
                         break
                 else:
