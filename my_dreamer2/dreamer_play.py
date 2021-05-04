@@ -275,7 +275,7 @@ class Play:
             }  # ob+1(obp1) for advantage method
 
             # if self.episode_step < 50000:
-            if self.episode_step >= self._c.time_limit == 0:
+            if self.episode_step >= self._c.time_limit:
                 print("pre-set!")
                 done = True
                 trainsaction["done"] = done

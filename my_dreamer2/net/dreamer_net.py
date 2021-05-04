@@ -454,13 +454,13 @@ class Dreamer:
         self.lr = 1e-5
         self.gamma = 0.99
         self.tau = 0.001
-        self.actor_entropy_loss_scale = 3 * 1e-3
+
         self.eta_x = config.eta_x
         self.eta_r = config.eta_r
         self.eta_gamma = config.eta_gamma
         self.eta_t = config.eta_t
         self.eta_q = config.eta_q
-        # self.actor_entropy = lambda x=self._c.actor_entropy: schedule(x, self._step)
+
 
         self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
         self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
@@ -506,7 +506,7 @@ class Dreamer:
             init_std=self._c.action_init_std,
             act=actv,
         )
-        # print("tf.zeros_like(acts.low):",tf.zeros_like(actspace.low)) # tf.Tensor([0. 0. 0. 0.], shape=(4,), dtype=float32)
+        print("tf.zeros_like(acts.low):",tf.zeros_like(actspace.low)) # tf.Tensor([0. 0. 0. 0.], shape=(4,), dtype=float32)
         self.random_actor = tools.OneHotDist(tf.zeros_like(actspace.low)[None])
 
         model_modules = [self.encoder, self.dynamics, self.decoder, self.reward_decoder]
@@ -1006,7 +1006,7 @@ class Dreamer:
 
             # print("value_diff:", value_diff)
 
-            actor_loss = imag_action_prob[:, :-1] * value_diff
+            actor_target = imag_action_prob[:, :-1] * value_diff
 
             # print("lambda_returns: ", lambda_returns.shape)  # (14, 2450)
             # print("actor_loss:",actor_loss.shape) # (2450, 14)
@@ -1014,22 +1014,22 @@ class Dreamer:
 
             actor_mix = self._c.imag_gradient_mix()
 
-            mix_actor_loss = (
+            mix_actor_target = (
                 tf.transpose(lambda_returns, [1, 0]) * actor_mix
-                + (1 - actor_mix) * actor_loss
+                + (1 - actor_mix) * actor_target
             )
-            print("mix_actor_loss:",mix_actor_loss) # (2450, 14)
+            # print("mix_actor_loss:",mix_actor_loss) # (2450, 14)
 
             if not self._c.future_entropy and tf.greater(
                 self._c.actor_entropy(), 0
                 ):
-                mix_actor_loss += self._c.actor_entropy() * actor_ent[:,:-1]
+                mix_actor_target += self._c.actor_entropy() * actor_ent[:,:-1]
             if not self._c.future_entropy and tf.greater(
                 self._c.actor_state_entropy(), 0
                 ):
-                mix_actor_loss += self._c.actor_state_entropy() * state_ent[:-1]
+                mix_actor_target += self._c.actor_state_entropy() * state_ent[:-1]
             
-            actor_loss = tf.reduce_mean(discount * mix_actor_loss)
+            actor_loss = -tf.reduce_mean(discount * mix_actor_target)
 
         # actor_var = []
         # actor_var.extend(self.actor.trainable_variables)

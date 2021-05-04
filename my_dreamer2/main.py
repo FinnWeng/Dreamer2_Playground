@@ -41,8 +41,8 @@ def define_config():
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
-    # config.dyn_cell = "gru_layer_norm"
-    config.dyn_cell = "gru"
+    config.dyn_cell = "gru_layer_norm"
+    # config.dyn_cell = "gru"
     config.deter_size = 800
     config.stoch_size = 32
     config.num_units = 400
@@ -115,6 +115,10 @@ def define_config():
 if __name__ == "__main__":
 
     config = define_config()
+    config.steps //= config.action_repeat
+    config.eval_every //= config.action_repeat
+    config.log_every //= config.action_repeat
+    config.time_limit //= config.action_repeat
 
     wrapped_gym = Gym_Wrapper(
         config.task,
