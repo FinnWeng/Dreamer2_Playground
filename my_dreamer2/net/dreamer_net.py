@@ -34,6 +34,37 @@ def world_model_imagine(fn, state_dict, action_array):
 
     return output_dict
 
+def world_model_imagine_fresh_action(fn, state_dict, action_array):
+    """
+    from state, input (action)
+    state(stoch): (25*batch_length, 30)
+    action_array: (batch_size, horizon,act_dim)
+    """
+    state_dict_list = []
+    feat_list = []
+    current_state = state_dict
+    output_dict = {}
+    for i in range(action_array.shape[1]):  # to horizon
+
+        current_state, feat = fn(current_state, action_array[:, i, :])
+        state_dict_list.append(current_state)
+        feat_list.append(feat)
+    for k, v in state_dict.items():
+        list_of_v = [
+            x[k] for x in state_dict_list
+        ]  # each is (batch_size*batch_length, 30)
+        v_tensor = tf.stack(
+            list_of_v, 1
+        )  # each is (batch_size*batch_length, horizon, 30)
+        output_dict[k] = v_tensor
+
+    feats = tf.stack(
+            feat_list, 1
+        )  # each is (batch_size*batch_length, horizon, 30)
+
+    return output_dict, feats
+
+
 
 def world_model_observing(fn, state_dict, action_array, embed_array):
     """
@@ -689,30 +720,36 @@ class Dreamer:
             x, [-1] + list(x.shape[2:])
         )  # to (batch_size*batch_length,230)
         start = {k: flatten(v) for k, v in state.items()}  # flatten evey entry of dict
-        policy = lambda state: self.actor(
-            tf.stop_gradient(self.dynamics.get_feat(state))
-        ).sample()  # local policy since we don't want to update world model here.
+        # policy = lambda state: self.actor(
+        #     tf.stop_gradient(self.dynamics.get_feat(state))
+        # ).sample()  # local policy since we don't want to update world model here.
 
-        img_step_fresh_action = lambda prev, _: self.dynamics.img_step(
-            prev, policy(prev)
-        )  # the _ is where the storage action is been put
+        # img_step_fresh_action = lambda prev, _: self.dynamics.img_step(
+        #     prev, policy(prev)
+        # )  # the _ is where the storage action is been put
+
+        def img_step_fresh_action(prev, _):
+            feat = tf.stop_gradient(self.dynamics.get_feat(prev))
+            action = self.actor(feat).sample()
+            succ = self.dynamics.img_step(
+                prev, action
+                    )  # the _ is where the storage action is been put
+            return succ, feat
+
+
         control_array = tf.range(
             self._c.horizon
         )  # now ths action is only for control iteration times. So I called it control array
         control_array = tf.reshape(control_array, [1, -1, 1])
-        states = world_model_imagine(
+        states, imag_feat = world_model_imagine_fresh_action(
             img_step_fresh_action, start, control_array
         )  # each is (batch_length*batch_length, horizon, 30)
+
+        print("feats:",feats.shape)# concate state and obs # (1225,15,  230)
 
         # start_state: {'logit_vector': <tf.Tensor: shape=(50, 49, 32, 32)
         # states" 'logit_vector': <tf.Tensor: shape=(2450, 15, 32, 32)
 
-
-
-
-        imag_feat = self.dynamics.get_feat(
-            states
-        )  # concate state and obs # (1225,15,  230)
 
         start_state_logit_vector = tf.reshape(start_state["logit_vector"],[-1,1,32,self._c.stoch_size])
         imag_states = {'logit_vector': tf.concat([start_state_logit_vector, states['logit_vector'][:,:-1]], 1)} # post concat prior
