@@ -275,6 +275,7 @@ class Play:
             }  # ob+1(obp1) for advantage method
 
             # if self.episode_step < 50000:
+
             if self.episode_step >= self._c.time_limit:
                 print("pre-set!")
                 done = True
@@ -316,6 +317,7 @@ class Play:
                 #     self.env._env.action_space.sample()
                 # )  # whether it is discrete or not, 0 is proper
                 self.ob = self.env.reset()
+                self.episode_step = 1
 
                 average_reward = self.episode_reward / self.episode_step
 
@@ -593,7 +595,7 @@ class Play:
             # for first 100 batch, play just 500 step
 
             # if self.episode_step < 50000:
-            if self.episode_step % self._c.time_limit == 0:
+            if self.episode_step >= self._c.time_limit:
                 print("pre-set!")
                 done = True
                 self.episode_step = 1
