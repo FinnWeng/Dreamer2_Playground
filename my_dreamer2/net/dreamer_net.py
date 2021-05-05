@@ -745,7 +745,7 @@ class Dreamer:
             img_step_fresh_action, start, control_array
         )  # each is (batch_length*batch_length, horizon, 30)
 
-        print("feats:",feats.shape)# concate state and obs # (1225,15,  230)
+        # print("imag_feat:",imag_feat.shape)# concate state and obs # (1225,15,  230)
 
         # start_state: {'logit_vector': <tf.Tensor: shape=(50, 49, 32, 32)
         # states" 'logit_vector': <tf.Tensor: shape=(2450, 15, 32, 32)
