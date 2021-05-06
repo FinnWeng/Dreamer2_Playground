@@ -1019,7 +1019,7 @@ class Dreamer:
                     tf.concat([tf.ones_like(discount[:, :1]), discount[:, :-2]], 1), 1
                 )
             )  # not to effect the world model
-            # print("discount:",discount.shape) # (2450, 14)
+            # print("weights:",weights.shape) # (2450, 14)
 
             actor_inp = tf.stop_gradient(imag_feat) if self._c.behavior_stop_grad else imag_feat
             policy = self.actor(actor_inp)
@@ -1089,7 +1089,7 @@ class Dreamer:
             #     "value_pred.log_prob(target).shape:", value_pred.log_prob(target).shape
             # )  # (14, 1225)
             critic_loss = -tf.reduce_mean(
-                discount * value_pred.log_prob(target)
+                weights * value_pred.log_prob(target)
             )  # to directy predict return. gradient is not effecting world model
 
         # critic_var = []
