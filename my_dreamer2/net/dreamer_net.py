@@ -1009,6 +1009,15 @@ class Dreamer:
                 post
             )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
 
+            discount_inp = self._world_model.dynamics.get_feat(imag_state) # since the feat s prev feat
+            discount = self._pcont(discount_inp).mean()
+            weights = tf.stop_gradient(
+                tf.math.cumprod(
+                    tf.concat([tf.ones_like(discount[:, :1]), discount[:, :-2]], 1), 1
+                )
+            )  # not to effect the world model
+            # print("discount:",discount.shape) # (2450, 14)
+
             actor_inp = tf.stop_gradient(imag_feat) if self._c.behavior_stop_grad else imag_feat
             policy = self.actor(actor_inp)
 
@@ -1021,19 +1030,12 @@ class Dreamer:
             imag_action_prob = policy.log_prob(imag_action)
             # print("imag_action_prob:", imag_action_prob) # (2450, 15)
 
-            # print("imag_feat.shape:",imag_feat.shape) # (500, 15, 230)
-            pcont = self._pcont(imag_feat).mean()
-            # print("pcont.shape:",pcont.shape) # (2450, 15)
 
-            discount = tf.stop_gradient(
-                tf.math.cumprod(
-                    tf.concat([tf.ones_like(pcont[:, :1]), pcont[:, :-2]], 1), 1
-                )
-            )  # not to effect the world model
-            # print("discount:",discount.shape) # (2450, 14)
+
+
 
             lambda_returns = self.lambda_returns(
-                imag_feat, pcont, _lambda=self._c.discount_lambda,actor_ent = actor_ent, state_ent= state_ent
+                imag_feat, discount, _lambda=self._c.discount_lambda,actor_ent = actor_ent, state_ent= state_ent
             )  # an exponentially-weighted average of the estimates V for different k to balance bias and variance
 
             value_diff = tf.stop_gradient(
@@ -1066,7 +1068,7 @@ class Dreamer:
                 ):
                 mix_actor_target += self._c.actor_state_entropy() * state_ent[:-1]
             
-            actor_loss = -tf.reduce_mean(discount * mix_actor_target)
+            actor_loss = -tf.reduce_mean(weights * mix_actor_target)
 
         # actor_var = []
         # actor_var.extend(self.actor.trainable_variables)
