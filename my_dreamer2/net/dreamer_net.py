@@ -750,10 +750,13 @@ class Dreamer:
         # start_state: {'logit_vector': <tf.Tensor: shape=(50, 49, 32, 32)
         # states" 'logit_vector': <tf.Tensor: shape=(2450, 15, 32, 32)
 
-
-        start_state_logit_vector = tf.reshape(start_state["logit_vector"],[-1,1,32,self._c.stoch_size])
-        imag_states = {'logit_vector': tf.concat([start_state_logit_vector, states['logit_vector'][:,:-1]], 1)} # post concat prior
-
+        # print('start["logit_vector"]',start["logit_vector"].shape) # (2450, 32, 32)
+        # print('start["stoch"]',start["stoch"].shape) # (2450, 1024) 
+        # print('start["deter"]',start["deter"].shape) # (2450, 800) 
+        # print("states['logit_vector']",states['logit_vector'].shape) # (2450, 15, 32, 32)
+        # print("states['stoch']",states['stoch'].shape) # (2450, 15, 1024)
+        # print("states['deter']",states['deter'].shape) # (2450, 15, 800)
+        imag_states = {k: tf.concat([tf.expand_dims(start[k],1), v[:,:-1]], 1) for k, v in states.items()}
 
         return imag_feat, imag_states
 
@@ -1009,7 +1012,7 @@ class Dreamer:
                 post
             )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
 
-            discount_inp = self._world_model.dynamics.get_feat(imag_state) # since the feat s prev feat
+            discount_inp = self.dynamics.get_feat(imag_state) # since the feat s prev feat
             discount = self._pcont(discount_inp).mean()
             weights = tf.stop_gradient(
                 tf.math.cumprod(
