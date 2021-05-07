@@ -912,7 +912,7 @@ class Dreamer:
         kl_free = tools.schedule(self._c.kl_free, self._step)
         kl_scale = tools.schedule(self._c.kl_scale, self._step)
 
-        self._update_slow_target()
+        
 
         with tf.GradientTape() as world_tape:
             """
@@ -973,11 +973,6 @@ class Dreamer:
 
             mix = 1 - kl_balance
 
-            # kl_blancing_div = self.eta_t * tf.reduce_mean(
-            #     tfd.kl_divergence(stop_post_dist, prior_dist)
-            # ) + self.eta_q * tf.reduce_mean(
-            #     tfd.kl_divergence(post_dist, stop_prior_dist)
-            # )
 
             value_lhs = value = tfd.kl_divergence(post_dist, stop_prior_dist)
             value_rhs = tfd.kl_divergence(stop_post_dist, prior_dist)
@@ -985,6 +980,7 @@ class Dreamer:
             loss_rhs = tf.maximum(tf.reduce_mean(value_rhs), kl_free)
             loss = mix * loss_lhs + (1 - mix) * loss_rhs
             loss *= kl_scale
+
             world_loss = loss - sum(likes.values())
 
             """
@@ -1002,6 +998,8 @@ class Dreamer:
         # world_grads = world_tape.gradient(world_loss, world_var)
         world_model_parts = [self.encoder, self.decoder, self.dynamics,self.reward_decoder,self._pcont]
         self.world_optimizer(world_tape, world_loss, world_model_parts)
+
+        self._update_slow_target()
 
         with tf.GradientTape() as actor_tape:
 
@@ -1138,9 +1136,9 @@ class Dreamer:
                     world_loss,
                     step=self._step.numpy() * self._c.action_repeat,
                 )
-                # tf.summary.scalar(
-                #     "average_reward", tf.reduce_mean(rewards), step=self.update_step
-                # )
+
+                
+ 
 
         if self.update_step % 2000 == 0:
             print("do image summaries saving!!")
