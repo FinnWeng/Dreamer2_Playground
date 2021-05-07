@@ -412,13 +412,42 @@ class Play:
     def post_process_episodes(self, cache, episode_name, episode):
         total = 0
         length = len(episode["rewards"]) - 1
+        score = float(episode['rewards'].astype(np.float64).sum())
         for key, ep in reversed(sorted(cache.items(), key=lambda x: x[0])):
 
-            if (total + length) >= self._c.max_dataset_steps:
-                del cache[key]
-            else:
-
+            if total <= self._c.max_dataset_steps - length:
                 total += len(ep["rewards"]) - 1
+            else:
+                del cache[key]
+            
+        with self.model._writer.as_default():
+            tf.summary.scalar(
+                    'dataset_size',
+                    total + length,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )  # control by model.total_step, record the env total step
+            
+            tf.summary.scalar(
+                    'train_episodes',
+                    len(cache),
+                    step=self._step.numpy() * self._c.action_repeat,
+                )  # control by model.total_step, record the env total step
+            
+            tf.summary.scalar(
+                    'train_return',
+                    score,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )  # control by model.total_step, record the env total step
+            
+            tf.summary.scalar(
+                    'train_length',
+                    length,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )  # control by model.total_step, record the env total step
+            
+
+            
+            
 
         cache[str(episode_name)] = episode
         print("the episodes size now is:", total + length, "steps")

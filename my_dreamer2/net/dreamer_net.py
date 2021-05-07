@@ -1000,7 +1000,8 @@ class Dreamer:
         # world_var.extend(self.decoder.trainable_variables)
         # world_var.extend(self.dynamics.trainable_variables)
         # world_grads = world_tape.gradient(world_loss, world_var)
-        world_model_parts = [self.encoder, self.decoder, self.dynamics]
+        world_model_parts = [self.encoder, self.decoder, self.dynamics,self.reward_decoder,self._pcont]
+        self.world_optimizer(world_tape, world_loss, world_model_parts)
 
         with tf.GradientTape() as actor_tape:
 
@@ -1088,20 +1089,13 @@ class Dreamer:
             # print(
             #     "value_pred.log_prob(target).shape:", value_pred.log_prob(target).shape
             # )  # (14, 1225)
-            critic_loss = -tf.reduce_mean(
-                weights * value_pred.log_prob(target)
+            critic_loss = tf.reduce_mean(
+                weights * -value_pred.log_prob(target)
             )  # to directy predict return. gradient is not effecting world model
 
-        # critic_var = []
-        # critic_var.extend(self.critic.trainable_variables)
-        # critic_grads = critic_tape.gradient(critic_loss, critic_var)
+
         critic_model_parts = [self.critic]
-
-        # self.world_optimizer.apply_gradients(zip(world_grads, world_var))
-        # self.critic_optimizer.apply_gradients(zip(critic_grads, critic_var))
-        # self.actor_optimizer.apply_gradients(zip(actor_grads, actor_var))
-
-        self.world_optimizer(world_tape, world_loss, world_model_parts)
+        
         self.actor_optimizer(actor_tape, actor_loss, actor_model_parts)
         self.critic_optimizer(critic_tape, critic_loss, critic_model_parts)
 
