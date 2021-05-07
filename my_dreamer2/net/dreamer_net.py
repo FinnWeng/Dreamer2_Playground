@@ -320,10 +320,11 @@ class RSSM(tf.keras.Model):
         #     return tfd.MultivariateNormalDiag(state["mean"], state["std"])
         """
         if stop_grad:
-            return tfd.Independent(tfd.OneHotCategorical(tf.stop_gradient(state["logit_vector"])),1)
+            # return tfd.Independent(tfd.OneHotCategorical(tf.stop_gradient(state["logit_vector"])),1)
+            return tfd.Independent(tools.OneHotDist(tf.stop_gradient(state["logit_vector"])),1)
 
         else:
-            return tfd.Independent(tfd.OneHotCategorical(state["logit_vector"]),1)
+            return tfd.Independent((tools.OneHotDist(state["logit_vector"]),1))
 
     @tf.function
     def img_step(self, prev_state, prev_action):
