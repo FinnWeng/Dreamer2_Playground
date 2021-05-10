@@ -150,43 +150,22 @@ class SampleDist:
         return -tf.reduce_mean(logprob, 0)
 
 
-class OneHotDist:
-    def __init__(self, logits=None, probs=None):
-        self._dist = tfd.Categorical(logits=logits, probs=probs)
-        self._num_classes = self.mean().shape[-1]
-        self._dtype = prec.global_policy().compute_dtype
-
-    @property
-    def name(self):
-        return "OneHotDist"
-
-    def __getattr__(self, name):
-        return getattr(self._dist, name)
-
-    def prob(self, events):
-        indices = tf.argmax(events, axis=-1)
-        return self._dist.prob(indices)
-
-    def log_prob(self, events):
-        indices = tf.argmax(events, axis=-1)
-        return self._dist.log_prob(indices)
-
-    def mean(self):
-        return self._dist.probs_parameter()
+class OneHotDist(tfd.OneHotCategorical):
+    def __init__(self, logits=None, probs=None, dtype=None):
+        self._sample_dtype = dtype or prec.global_policy().compute_dtype
+        super().__init__(logits=logits, probs=probs)
 
     def mode(self):
-        return self._one_hot(self._dist.mode())
+        return tf.cast(super().mode(), self._sample_dtype)
 
-    def sample(self, amount=None):
-        amount = [amount] if amount else []
-        indices = self._dist.sample(*amount)
-        sample = self._one_hot(indices)
-        probs = self._dist.probs_parameter()
-        sample += tf.cast(probs - tf.stop_gradient(probs), self._dtype)
+    def sample(self, sample_shape=(), seed=None):
+        # Straight through biased gradient estimator.
+        sample = tf.cast(super().sample(sample_shape, seed), self._sample_dtype)
+        probs = super().probs_parameter()
+        while len(probs.shape) < len(sample.shape):
+            probs = probs[None]
+        sample += tf.cast(probs - tf.stop_gradient(probs), self._sample_dtype)
         return sample
-
-    def _one_hot(self, indices):
-        return tf.one_hot(indices, self._num_classes, dtype=self._dtype)
 
 
 def schedule(string, step):

@@ -371,11 +371,6 @@ class RSSM(tf.keras.Model):
         )
         # print("stoch:", stoch.shape)  # (25, 32 , _stoch_size), one hot vectors
 
-        """
-        Straight-Through Gradients trick
-        """
-        stoch = stoch + prob_vector - tf.stop_gradient(prob_vector)
-
         stoch = tf.keras.layers.Flatten()(stoch)  # # (25, 32*_stoch_size)
 
         """
