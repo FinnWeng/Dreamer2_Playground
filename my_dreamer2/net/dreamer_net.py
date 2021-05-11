@@ -112,10 +112,10 @@ class ConvEncoder(tf.keras.Model):
         self.activation = activation
         self.filters = filters
         kwargs = dict(strides=2, activation=self.activation)
-        self.l1 = tf.keras.layers.Conv2D(1 * self.filters, kernel_size=4, **kwargs)
-        self.l2 = tf.keras.layers.Conv2D(2 * self.filters, kernel_size=4, **kwargs)
-        self.l3 = tf.keras.layers.Conv2D(4 * self.filters, kernel_size=4, **kwargs)
-        self.l4 = tf.keras.layers.Conv2D(8 * self.filters, kernel_size=4, **kwargs)
+        self.l1 = tf.keras.layers.Conv2D(2 ** 0 * self.filters, kernel_size=4, **kwargs)
+        self.l2 = tf.keras.layers.Conv2D(2 ** 1 * self.filters, kernel_size=4, **kwargs)
+        self.l3 = tf.keras.layers.Conv2D(2 ** 2 * self.filters, kernel_size=4, **kwargs)
+        self.l4 = tf.keras.layers.Conv2D(2 ** 3 * self.filters, kernel_size=4, **kwargs)
         # self.l5 = tf.keras.layers.Conv2D(8 * self.filters, kernel_size=4, **kwargs)
 
     def call(self, obs):
@@ -257,14 +257,14 @@ class ValueDecoder(tf.keras.Model):
         for index in range(self.layers_num):  # 3
             x = self.get(f"h{index}", tf.keras.layers.Dense, self._units, self._act)(x)
             # print("x:",x.shape) #  (15, 1250, 400)
-        x = self.get(f"hout", tf.keras.layers.Dense, np.prod(self._shape))(x)
+        mean = self.get(f"hmean", tf.keras.layers.Dense, np.prod(self._shape))(x)
         # print("x:",x.shape)
-        x = tf.reshape(x, tf.concat([tf.shape(features)[:-1], self._shape], 0))
+        mean = tf.reshape(x, tf.concat([tf.shape(features)[:-1], self._shape], 0))
         # print("x:",x.shape)
         if self._dist == "normal":
-            return tfd.Independent(tfd.Normal(x, 1), len(self._shape))
+            return tfd.Independent(tfd.Normal(mean, 1), len(self._shape))
         if self._dist == "binary":
-            return tfd.Independent(tfd.Bernoulli(x), len(self._shape))
+            return tfd.Independent(tfd.Bernoulli(mean), len(self._shape))
         raise NotImplementedError(self._dist)
 
 
@@ -360,11 +360,10 @@ class RSSM(tf.keras.Model):
             x
         )  # =>(25, 32* _stoch_size)
         logit_vector = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
-        prob_vector = tf.keras.layers.Softmax()(
-            logit_vector
-        )  # (25, 32,  _stoch_size), which means 32 distinct categorical distibution
 
-  
+        """
+        Straight-Through Gradients trick is built-in in get_dist 
+        """
 
         stoch = tf.cast(
             self.get_dist({"logit_vector": logit_vector}).sample(), tf.float32
@@ -400,19 +399,13 @@ class RSSM(tf.keras.Model):
         x = self.get("obs3", tf.keras.layers.Dense, 32 * self._stoch_size, None)(x)
         # print("x:", x.shape)
         logit_vector = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
-        prob_vector = tf.keras.layers.Softmax()(
-            logit_vector
-        )  # (25, 32,  _stoch_size), which means 32 distinct categorical distibution
 
-
+        """
+        Straight-Through Gradients trick is built-in in get_dist 
+        """
         stoch = tf.cast(
             self.get_dist({"logit_vector": logit_vector}).sample(), tf.float32
-        )
-        """
-        Straight-Through Gradients trick
-        """
-        stoch = stoch + prob_vector - tf.stop_gradient(prob_vector)
-        stoch = tf.keras.layers.Flatten()(stoch)  # # (25, 32*_stoch_size)
+        ) # 
 
         post = {"logit_vector": logit_vector, "stoch": stoch, "deter": prior["deter"]}
         return post, prior
@@ -474,7 +467,6 @@ class Dreamer:
         # self.observation_dim = env.observation_dim # 57
         self.observation_dim = len(env._observation)
         self.filters = 4
-        self.kernel_size = 3
         self.activation_fn = tf.keras.layers.PReLU
         self.hidden_size = 20
 
@@ -511,17 +503,17 @@ class Dreamer:
 
         self.decoder = ConvDecoder(self._c.cnn_depth, cnn_actv, shape=output_shape)
 
-        self.reward_decoder = ValueDecoder((), 2, self._c.num_units, act=actv)
+        self.reward_decoder = ValueDecoder((), 4, self._c.num_units, act=actv)
         if self._c.pcont:
-            self._pcont = ValueDecoder((), 3, self._c.num_units, "binary", act=actv)
+            self._pcont = ValueDecoder((), 4, self._c.num_units, "binary", act=actv)
             # print("self._pcont:", self._pcont.variables)
         self.critic = ValueDecoder(
-            (), 3, self._c.num_units, act=actv
+            (), 4, self._c.num_units, act=actv
         )  # critic, no advantage
 
         if config.slow_value_target or config.slow_actor_target:
             self.slow_critic = ValueDecoder(
-                (), 3, self._c.num_units, act=actv
+                (), 4, self._c.num_units, act=actv
             )  # critic, no advantage
             self._updates = tf.Variable(0, tf.int64)
 
@@ -939,11 +931,11 @@ class Dreamer:
             # print(
             #     "image_pred:", image_pred.batch_shape, image_pred.event_shape
             # )  # (50, 10) (64, 64, 3)
-            likes["images_prob"] = self.eta_x * tf.reduce_mean(
+            likes["images_prob"] = -self.eta_x * tf.reduce_mean(
                 image_pred.log_prob(obp1s)
             )
             # print("rewards")
-            likes["rewards_prob"] = self.eta_r * tf.reduce_mean(
+            likes["rewards_prob"] = -self.eta_r * tf.reduce_mean(
                 reward_pred.log_prob(rewards)
             )
             if (
@@ -953,7 +945,7 @@ class Dreamer:
                 pcont_target = (
                     self._c.discount * record_discounts
                 )  # all 1* discount except the done which will be 0. Explicitly make it to learn what is done state.
-                likes["pcont_prob"] = tf.reduce_mean(
+                likes["pcont_prob"] = - tf.reduce_mean(
                     pcont_pred.log_prob(pcont_target)
                 )  # shape = (50,10)
                 likes["pcont_prob"] *= self._c.pcont_scale
@@ -977,7 +969,7 @@ class Dreamer:
             loss = mix * loss_lhs + (1 - mix) * loss_rhs
             loss *= kl_scale
 
-            world_loss = loss - sum(likes.values())
+            world_loss = loss + sum(likes.values())
 
             """
             the model loss is exactly the VAE loss of world model(which is VAE sample generator)
