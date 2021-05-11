@@ -162,7 +162,7 @@ class ConvDecoder(tf.keras.Model):
         x = self.get("h1", tf.keras.layers.Dense, 32 * self._depth, None)(features)
         x = tf.reshape(x, [-1, 1, 1, 32 * self._depth])
         x = self.get(
-            "h2", tf.keras.layers.Conv2DTranspose, 4 * self._depth, 5, **kwargs
+            "h2", tf.keras.layers.Conv2DTranspose, 2 ** (4 - 0 - 2) * self._depth, 5, **kwargs
         )(x)
         x = self.get(
             "h3", tf.keras.layers.Conv2DTranspose, 2 * self._depth, 5, **kwargs
@@ -406,6 +406,7 @@ class RSSM(tf.keras.Model):
         stoch = tf.cast(
             self.get_dist({"logit_vector": logit_vector}).sample(), tf.float32
         ) # 
+        stoch = tf.keras.layers.Flatten()(stoch)  # # (25, 32*_stoch_size)
 
         post = {"logit_vector": logit_vector, "stoch": stoch, "deter": prior["deter"]}
         return post, prior
