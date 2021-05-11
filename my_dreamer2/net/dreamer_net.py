@@ -259,7 +259,7 @@ class ValueDecoder(tf.keras.Model):
             # print("x:",x.shape) #  (15, 1250, 400)
         mean = self.get(f"hmean", tf.keras.layers.Dense, np.prod(self._shape))(x)
         # print("x:",x.shape)
-        mean = tf.reshape(x, tf.concat([tf.shape(features)[:-1], self._shape], 0))
+        mean = tf.reshape(mean, tf.concat([tf.shape(features)[:-1], self._shape], 0))
         # print("x:",x.shape)
         if self._dist == "normal":
             return tfd.Independent(tfd.Normal(mean, 1), len(self._shape))
