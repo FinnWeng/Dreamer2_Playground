@@ -237,7 +237,7 @@ class ActionDecoder(tf.keras.Model):
 class ValueDecoder(tf.keras.Model):
     def __init__(self, shape, layers_num, filters, dist="normal", act=tf.nn.elu):
         super(ValueDecoder, self).__init__()
-        # (), 3, self._c.num_units = 400, act=act
+        # (), 3, self._c.units = 400, act=act
         self._shape = shape
         self.layers_num = layers_num
         self._units = filters
@@ -269,12 +269,14 @@ class ValueDecoder(tf.keras.Model):
 
 
 class RSSM(tf.keras.Model):
-    def __init__(self, stoch=30, deter=200, hidden=200, act=tf.nn.elu, cell="gru"):
+    def __init__(self, stoch=30, deter=200, hidden=200, discrete = 0, act=tf.nn.elu, cell="gru"):
         super(RSSM, self).__init__()
+        self._stoch = stoch
         self._activation = act
         self._stoch_size = stoch
         self._deter_size = deter
         self._hidden_size = hidden
+        self._discrete = discrete
         if cell == "gru":
             self._cell = tf.keras.layers.GRUCell(
                 self._deter_size
@@ -300,8 +302,8 @@ class RSSM(tf.keras.Model):
         # )  # zero initialization, float32
         dtype = tf.float32
         return dict(
-            logit_vector=tf.zeros([batch_size, 32, self._stoch_size], dtype),
-            stoch=tf.zeros([batch_size, 32 * self._stoch_size], dtype),
+            logit_vector=tf.zeros([batch_size, self._stoch, self._discrete], dtype),
+            stoch=tf.zeros([batch_size, self._stoch * self._discrete], dtype),
             deter=self._cell.get_initial_state(None, batch_size, dtype),
         )  # zero initialization, float32
 
@@ -339,27 +341,17 @@ class RSSM(tf.keras.Model):
         x = self.get(
             "img1", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
-        x = self.get(
-            "img2", tf.keras.layers.Dense, self._hidden_size, self._activation
-        )(x)
         x, deter = self._cell(
             x, [prev_state["deter"]]
         )  # (output, next_state) = call(input, state)
         # x: (25, 200)
-
         deter = deter[0]  # Keras wraps the state in a list.
 
         # below is VAE prior, which means P(z|x)
-        x = self.get(
-            "img3", tf.keras.layers.Dense, self._hidden_size, self._activation
-        )(x)
-        x = self.get(
-            "img4", tf.keras.layers.Dense, self._hidden_size, self._activation
-        )(x)
-        x = self.get("img5", tf.keras.layers.Dense, 32 * self._stoch_size, None)(
+        x = self.get("img5", tf.keras.layers.Dense, self._stoch * self._discrete, None)(
             x
         )  # =>(25, 32* _stoch_size)
-        logit_vector = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
+        logit_vector = tf.reshape(x, [-1, self._stoch, self._discrete])  # # =>(25, 32,  _stoch_size)
 
         """
         Straight-Through Gradients trick is built-in in get_dist 
@@ -393,12 +385,10 @@ class RSSM(tf.keras.Model):
         x = self.get(
             "obs1", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
-        x = self.get(
-            "obs2", tf.keras.layers.Dense, self._hidden_size, self._activation
-        )(x)
-        x = self.get("obs3", tf.keras.layers.Dense, 32 * self._stoch_size, None)(x)
+
+        x = self.get("obs3", tf.keras.layers.Dense, self._stoch * self._discrete, None)(x)
         # print("x:", x.shape)
-        logit_vector = tf.reshape(x, [-1, 32, self._stoch_size])  # # =>(25, 32,  _stoch_size)
+        logit_vector = tf.reshape(x, [-1, self._stoch, self._discrete])  # # =>(25, 32,  _stoch_size)
 
         """
         Straight-Through Gradients trick is built-in in get_dist 
@@ -489,9 +479,10 @@ class Dreamer:
         self.Dreamer_actor_path = "./model/Dreamer_actor.ckpt"
 
         self.dynamics = RSSM(
-            self._c.stoch_size,
-            self._c.deter_size,
-            self._c.deter_size,
+            self._c.dyn_stoch,
+            self._c.dyn_deter,
+            self._c.dyn_hidden,
+            self._c.dyn_discrete,
             tf.nn.elu,
             self._c.dyn_cell,
         )
@@ -504,24 +495,24 @@ class Dreamer:
 
         self.decoder = ConvDecoder(self._c.cnn_depth, cnn_actv, shape=output_shape)
 
-        self.reward_decoder = ValueDecoder((), 4, self._c.num_units, act=actv)
+        self.reward_decoder = ValueDecoder((), 4, self._c.units, act=actv)
         if self._c.pcont:
-            self._pcont = ValueDecoder((), 4, self._c.num_units, "binary", act=actv)
+            self._pcont = ValueDecoder((), 4, self._c.units, "binary", act=actv)
             # print("self._pcont:", self._pcont.variables)
         self.critic = ValueDecoder(
-            (), 4, self._c.num_units, act=actv
+            (), 4, self._c.units, act=actv
         )  # critic, no advantage
 
         if config.slow_value_target or config.slow_actor_target:
             self.slow_critic = ValueDecoder(
-                (), 4, self._c.num_units, act=actv
+                (), 4, self._c.units, act=actv
             )  # critic, no advantage
             self._updates = tf.Variable(0, tf.int64)
 
         self.actor = ActionDecoder(
             self._actdim,
             4,
-            self._c.num_units,
+            self._c.units,
             self._c.action_dist,
             init_std=self._c.action_init_std,
             act=actv,
