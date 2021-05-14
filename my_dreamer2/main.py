@@ -5,6 +5,8 @@ import gym
 from net.dreamer_net import Dreamer
 import functools
 import pathlib
+import tensorflow as tf
+
 
 
 class AttrDict(dict):
@@ -120,6 +122,16 @@ if __name__ == "__main__":
     config.eval_every //= config.action_repeat
     config.log_every //= config.action_repeat
     config.time_limit //= config.action_repeat
+
+
+    # self._dataset = iter(self.load_dataset(self.datadir, self._c))
+    gpus = tf.config.experimental.list_physical_devices("GPU")
+
+    tf.config.experimental.set_visible_devices(gpus[1], "GPU")
+    if gpus:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
 
     wrapped_gym = Gym_Wrapper(
         config.task,

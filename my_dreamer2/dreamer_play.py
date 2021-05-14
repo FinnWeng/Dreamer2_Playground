@@ -48,14 +48,7 @@ class Play:
         self.horizon = 15
         self.datadir = self._c.logdir / "episodes"
 
-        # self._dataset = iter(self.load_dataset(self.datadir, self._c))
-        gpus = tf.config.experimental.list_physical_devices("GPU")
 
-        tf.config.experimental.set_visible_devices(gpus[1], "GPU")
-        if gpus:
-            # Currently, memory growth needs to be the same across GPUs
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
 
         with tf.device("cpu:1"):
             self._step = tf.Variable(count_steps(self.datadir), dtype=tf.int64)
@@ -140,7 +133,7 @@ class Play:
                 act = TD_data[0]["action"]
                 obp1 = TD_data[-1]["obp1"]
 
-                for i in range(self.TD_size):
+                for i in range(len(TD_data)):
                     TD_reward += TD_data[i]["reward"]
                 done = TD_data[-1]["done"]
                 discount = TD_data[-1]["discount"]
@@ -173,7 +166,6 @@ class Play:
                 TD_reward = 0
                 ob = TD_data[0]["ob"]
 
-                time.sleep(0.01)
                 for i in range(self.TD_size):
                     TD_reward += TD_data[i]["reward"]
                 done = TD_data[-1]["done"]
@@ -190,18 +182,18 @@ class Play:
         """
         collect end when the play_records full or episode end
         """
-        trainsaction = {
-            "ob": self.ob,
-            "obp1": self.ob,
-            "action": np.zeros(
-                [
-                    4,
-                ]
-            ),
-            "reward": 0.0,
-            "done": 0,
-            "discount": np.array(1.0),
-        }
+        # trainsaction = {
+        #     "ob": self.ob,
+        #     "obp1": self.ob,
+        #     "action": np.zeros(
+        #         [
+        #             4,
+        #         ]
+        #     ),
+        #     "reward": 0.0,
+        #     "done": 0,
+        #     "discount": np.array(1.0),
+        # }
 
         episode_record = []
         """
@@ -215,8 +207,7 @@ class Play:
             # episode = []
             # while True:
             if using_random_policy:
-                act = self.model.random_policy()[0].numpy()  # to get batch dim
-                print("act:", act)
+                act = self.model.random_policy().numpy()  # to get batch dim
 
             else:
 
@@ -263,6 +254,7 @@ class Play:
 
             self._step.assign_add(1)
 
+
             trainsaction = {
                 "ob": self.ob,
                 "obp1": ob,
@@ -280,7 +272,8 @@ class Play:
                 print("pre-set!")
                 done = True
                 trainsaction["done"] = done
-                trainsaction["discount"] = 1.0
+                trainsaction["discount"] = np.array(
+                    1 - float(done))
 
             episode_record.append(trainsaction)
             # print(
@@ -332,18 +325,18 @@ class Play:
                         self.batch_size * self.batch_length * self.TD_size,
                         ", abort this episode",
                     )
-                    trainsaction = {
-                        "ob": self.ob,
-                        "obp1": self.ob,
-                        "action": np.zeros(
-                            [
-                                4,
-                            ]
-                        ),
-                        "reward": 0.0,
-                        "done": 0,
-                        "discount": np.array(1.0),
-                    }  # ob+1(obp1) for advantage method
+                    # trainsaction = {
+                    #     "ob": self.ob,
+                    #     "obp1": self.ob,
+                    #     "action": np.zeros(
+                    #         [
+                    #             4,
+                    #         ]
+                    #     ),
+                    #     "reward": 0.0,
+                    #     "done": 0,
+                    #     "discount": np.array(1.0),
+                    # }  # ob+1(obp1) for advantage method
                     episode_record = []
                     if not must_be_whole_episode:
                         break
@@ -371,7 +364,7 @@ class Play:
                 # so the structure of self.play_records is:
                 # (batch_size* batch_length*TD_size or greater , TD_size)
 
-            episode_record = []
+            
             tuple_of_episode_columns = self.TD_dict_to_TD_train_data(
                 self.play_records, True
             )  # for Dreamer, the TD = 1
@@ -402,8 +395,11 @@ class Play:
 
             self.post_process_episodes(self.episodes, filename, dict_of_episode_record)
 
+            episode_record = []
             self.post_process_play_records()
         else:
+            episode_record = []
+            self.post_process_play_records()
             print("not enough data!!")
 
     def post_process_play_records(self):
@@ -604,9 +600,6 @@ class Play:
             #         cv2.imwrite("./train_gen_img/play_img_{}.jpg".format(i), play_img)
             #     self.RGB_array_list = []
             #     self.save_play_img = False
-
-            if self.episode_step <= 1:
-                argmax_act = [1]
 
             ob, reward, done, info = self.act_repeat(
                 self.env, argmax_act[0], rendering=True

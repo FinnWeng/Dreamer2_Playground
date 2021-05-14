@@ -60,15 +60,11 @@ class Gym_Wrapper:
         high = np.where(self._mask, np.ones_like(self._low), self._high)
         return gym.spaces.Box(low, high, dtype=np.float32)
 
-    def crop_ob(self, ob):
-        h_start = self.shape[0] - self.crop_size[0]
-
-        ob = ob[h_start:, :, :]
-        return ob
 
     def reset(self):
 
         image = self._env.reset()
+        print("image:",image.shape)
         if self._grayscale:
             image = image[..., None]
         return image

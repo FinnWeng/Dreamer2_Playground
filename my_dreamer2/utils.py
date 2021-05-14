@@ -8,14 +8,17 @@ import datetime
 import tensorflow as tf
 import os
 import time
+# from tensorflow.keras.mixed_precision import experimental as prec
 
 
 def preprocess(episode_record, config):
     # print("preprocess episode_record:",episode_record.keys())
+    # dtype = prec.global_policy().compute_dtype
+    dtype = tf.float32
     with tf.device("cpu:0"):
-        episode_record["obs"] = tf.cast(episode_record["obs"], tf.float32) / 255.0 - 0.5
+        episode_record["obs"] = tf.cast(episode_record["obs"], dtype) / 255.0 - 0.5
         episode_record["obp1s"] = (
-            tf.cast(episode_record["obp1s"], tf.float32) / 255.0 - 0.5
+            tf.cast(episode_record["obp1s"], dtype) / 255.0 - 0.5
         )
         episode_record['rewards'] = getattr(tf, config.clip_rewards)(episode_record['rewards'])
         # clip_rewards = dict(none=lambda x: x, tanh=tf.tanh)[

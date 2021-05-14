@@ -42,13 +42,15 @@ def world_model_imagine_fresh_action(fn, state_dict, action_array):
     """
     state_dict_list = []
     feat_list = []
+    action_list = []
     current_state = state_dict
     output_dict = {}
     for i in range(action_array.shape[1]):  # to horizon
 
-        current_state, feat = fn(current_state, action_array[:, i, :])
+        current_state, feat, action = fn(current_state, action_array[:, i, :])
         state_dict_list.append(current_state)
         feat_list.append(feat)
+        action_list.append(action)
     for k, v in state_dict.items():
         list_of_v = [
             x[k] for x in state_dict_list
@@ -61,8 +63,12 @@ def world_model_imagine_fresh_action(fn, state_dict, action_array):
     feats = tf.stack(
             feat_list, 1
         )  # each is (batch_size*batch_length, horizon, 30)
+    
+    actions = tf.stack(
+            action_list, 1
+        )  # each is (batch_size*batch_length, horizon, 30)
 
-    return output_dict, feats
+    return output_dict, feats, actions
 
 
 
@@ -615,37 +621,6 @@ class Dreamer:
         # this reset the state saved for RSSM forwarding
         self.state = None
 
-    # def _exploration(self, action, training):
-    #     if training:
-
-    #         amount = self._c.expl_amount
-    #         if self._c.expl_decay:  # 0.3 is True
-    #             amount *= 0.5 ** (tf.cast(self._step, tf.float32) / self._c.expl_decay)
-    #         if self._c.expl_min:  # 0.0 is False
-    #             amount = tf.maximum(self._c.expl_min, amount)
-    #         self._metrics["expl_amount"].update_state(amount)
-    #     elif self._c.eval_noise:
-    #         amount = self._c.eval_noise
-    #     else:
-    #         return action
-    #     if self._c.expl == "additive_gaussian":
-    #         return tf.clip_by_value(tfd.Normal(action, amount).sample(), -1, 1)
-    #     if self._c.expl == "completely_random":
-    #         return tf.random.uniform(action.shape, -1, 1)
-    #     if self._c.expl == "epsilon_greedy":
-    #         # print(
-    #         #     "0 * action:", 0 * action
-    #         # )  # 0 * action: Tensor("mul:0", shape=(1, 4), dtype=float16)
-    #         indices = tfd.Categorical(0 * action).sample()
-    #         # print("epsilon_greedy indices:", indices)  # shape=(1,)
-    #         return tf.where(
-    #             tf.random.uniform(action.shape[:1], 0, 1)
-    #             < amount,  # randomly decide do epsilon greedy or not
-    #             tf.one_hot(indices, action.shape[-1], dtype=tf.float32),
-    #             action,
-    #         )
-
-    #     raise NotImplementedError(self._c.expl)
 
     def _exploration(self, action, training):
         amount = self._c.expl_amount if training else self._c.eval_noise
@@ -688,9 +663,8 @@ class Dreamer:
 
     def random_policy(self):
         action = self.random_actor.sample()
-        if self._c.is_discrete:
-            action = tf.nn.softmax(action, axis=-1)
-        return action, None
+
+        return action
 
     def imagine_ahead(self, start_state):
         # each value of start_state(post) dict is (25, batch_length,30)
@@ -700,28 +674,23 @@ class Dreamer:
             x, [-1] + list(x.shape[2:])
         )  # to (batch_size*batch_length,230)
         start = {k: flatten(v) for k, v in state.items()}  # flatten evey entry of dict
-        # policy = lambda state: self.actor(
-        #     tf.stop_gradient(self.dynamics.get_feat(state))
-        # ).sample()  # local policy since we don't want to update world model here.
 
-        # img_step_fresh_action = lambda prev, _: self.dynamics.img_step(
-        #     prev, policy(prev)
-        # )  # the _ is where the storage action is been put
 
         def img_step_fresh_action(prev, _):
-            feat = tf.stop_gradient(self.dynamics.get_feat(prev))
-            action = self.actor(feat).sample()
+            feat = self.dynamics.get_feat(prev)
+            inp = tf.stop_gradient(feat) if self._c.behavior_stop_grad else feat
+            action = self.actor(inp).sample()
             succ = self.dynamics.img_step(
                 prev, action
                     )  # the _ is where the storage action is been put
-            return succ, feat
+            return succ, feat, action
 
 
         control_array = tf.range(
             self._c.horizon
         )  # now ths action is only for control iteration times. So I called it control array
         control_array = tf.reshape(control_array, [1, -1, 1])
-        states, imag_feat = world_model_imagine_fresh_action(
+        states, imag_feat, imag_action = world_model_imagine_fresh_action(
             img_step_fresh_action, start, control_array
         )  # each is (batch_length*batch_length, horizon, 30)
 
@@ -738,7 +707,7 @@ class Dreamer:
         # print("states['deter']",states['deter'].shape) # (2450, 15, 800)
         imag_states = {k: tf.concat([tf.expand_dims(start[k],1), v[:,:-1]], 1) for k, v in states.items()}
 
-        return imag_feat, imag_states
+        return imag_feat, imag_states, imag_action
 
     def official_lambda_return(self, reward, value, pcont, bootstrap, lambda_, axis):
         # Setting lambda=1 gives a discounted Monte Carlo return.
@@ -987,7 +956,7 @@ class Dreamer:
             post = {k: drop_last(v) for k, v in post.items()}
 
             # post:
-            imag_feat, imag_state = self.imagine_ahead(
+            imag_feat, imag_state, imag_action = self.imagine_ahead(
                 post
             )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
 
@@ -1005,9 +974,6 @@ class Dreamer:
 
             actor_ent = policy.entropy() # (2450, 15)
             state_ent = self.dynamics.get_dist(imag_state).entropy() # (2450, 15, 32)
-
-
-            imag_action = self.actor(imag_feat).mode()
 
             imag_action_prob = policy.log_prob(imag_action)
             # print("imag_action_prob:", imag_action_prob) # (2450, 15)
