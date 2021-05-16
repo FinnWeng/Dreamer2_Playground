@@ -8,24 +8,28 @@ import datetime
 import tensorflow as tf
 import os
 import time
+
 # from tensorflow.keras.mixed_precision import experimental as prec
 
 
 def preprocess(episode_record, config):
     # print("preprocess episode_record:",episode_record.keys())
     # dtype = prec.global_policy().compute_dtype
+    episode_record = (
+        episode_record.copy()
+    )  # when used in policy(), do this to avoid the effect of data to save.
     dtype = tf.float32
     with tf.device("cpu:0"):
         episode_record["obs"] = tf.cast(episode_record["obs"], dtype) / 255.0 - 0.5
-        episode_record["obp1s"] = (
-            tf.cast(episode_record["obp1s"], dtype) / 255.0 - 0.5
+        episode_record["obp1s"] = tf.cast(episode_record["obp1s"], dtype) / 255.0 - 0.5
+        episode_record["rewards"] = getattr(tf, config.clip_rewards)(
+            episode_record["rewards"]
         )
-        episode_record['rewards'] = getattr(tf, config.clip_rewards)(episode_record['rewards'])
         # clip_rewards = dict(none=lambda x: x, tanh=tf.tanh)[
         #     config.clip_rewards
         # ]  # default none
         # episode_record["rewards"] = clip_rewards(episode_record["rewards"])
-        episode_record['discounts'] *= config.discount
+        episode_record["discounts"] *= config.discount
     return episode_record
 
 
@@ -64,22 +68,19 @@ def save_episode(directory, episode_record):
         f1.seek(0)
         with filename.open("wb") as f2:
             f2.write(f1.read())
-    
+
     return filename
-    
 
 
-def load_episodes(directory,limit = None):
+def load_episodes(directory, limit=None):
     # rescan - output shape
     directory = pathlib.Path(directory).expanduser()
-    
+
     cache = {}  # len 33
     # start_time = time.time()
     total_step = 0
 
-
     for filename in reversed(sorted(directory.glob("*.npz"))):
-        
 
         try:
             with filename.open("rb") as f:
@@ -97,21 +98,20 @@ def load_episodes(directory,limit = None):
             print(f"Could not load episode: {e}")
             continue
         cache[str(filename)] = episode
-        total_step += (len(episode["rewards"]) - 1)
+        total_step += len(episode["rewards"]) - 1
         if limit is not None:
             print("limit is not None")
-            
+
             if total_step >= limit:
                 print("over the limit!")
                 break
     keys = list(cache.keys())  # which means each name of episode record in dir
-    print("total_step:",total_step)
-    print("keys:",len(keys))
+    print("total_step:", total_step)
+    print("keys:", len(keys))
     return cache
-        
 
 
-def sample_episodes(episodes,length=None, balance=False, seed=0):
+def sample_episodes(episodes, length=None, balance=False, seed=0):
     random = np.random.RandomState(seed)
     # for index in random.choice(len(keys), rescan):
     while True:
@@ -121,7 +121,6 @@ def sample_episodes(episodes,length=None, balance=False, seed=0):
             total = len(next(iter(episode.values())))
             # print("this sampled episode length is:",total)
             available = total - length
-            
 
             if available < 1:
                 print(f"Skipped short episode of length {available}.")
@@ -130,13 +129,12 @@ def sample_episodes(episodes,length=None, balance=False, seed=0):
                 index = min(random.randint(0, total), available)
             else:
                 index = int(
-                    random.randint(0, available+1)
+                    random.randint(0, available + 1)
                 )  # randomly choose 0~available samples of  batch_length traj
 
             episode = {k: v[index : index + length] for k, v in episode.items()}
-        
-        yield episode
 
+        yield episode
 
 
 def load_dataset(episodes, config):  # load data from npz
@@ -145,18 +143,18 @@ def load_dataset(episodes, config):  # load data from npz
 
     example = episodes[next(iter(episodes.keys()))]
     types = {k: v.dtype for k, v in example.items()}
-    
+
     shapes = {k: (None,) + v.shape[1:] for k, v in example.items()}
     # print("shapes:",shapes)
 
     generator = lambda: sample_episodes(
-        episodes, config.batch_length, config.oversample_ends,
+        episodes,
+        config.batch_length,
+        config.oversample_ends,
     )
-    
-    dataset = tf.data.Dataset.from_generator(generator, types, shapes)
 
+    dataset = tf.data.Dataset.from_generator(generator, types, shapes)
     dataset = dataset.batch(config.batch_size, drop_remainder=True)
-    dataset = dataset.map(functools.partial(preprocess, config=config))
     dataset = dataset.prefetch(10)
     return dataset
 

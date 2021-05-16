@@ -652,7 +652,10 @@ class Dreamer:
             action = tf.zeros((len(obs), self._actdim), tf.float32)
         else:
             latent, action = self.state
-        obs = tf.cast(obs, tf.float32)
+        obs = tf.cast(
+            utils.preprocess(obs, self._c),
+            tf.float32,
+        )
         embed = self.encoder(obs)
         latent, _ = self.dynamics.obs_step(
             latent, action, embed

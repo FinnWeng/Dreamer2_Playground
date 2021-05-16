@@ -209,19 +209,16 @@ class Play:
 
             else:
 
-                processed_obs = utils.preprocess(
-                    {
-                        "obs": np.array([self.ob]),
-                        "obp1s": np.array([self.ob]),
-                        "rewards": 0.0,
-                        "discounts": 1.0,
-                    },
-                    self._c,
-                )[
+                obs = {
+                    "obs": np.array([self.ob]),
+                    "obp1s": np.array([self.ob]),
+                    "rewards": 0.0,
+                    "discounts": 1.0,
+                }[
                     "obs"
                 ]  # obp1s is for redundant here
 
-                act, self.model.state = self.model.policy(processed_obs, training=True)
+                act, self.model.state = self.model.policy(obs, training=True)
                 act = act.numpy()
 
             if self._c.is_discrete:
@@ -467,10 +464,8 @@ class Play:
 
         4. in each batch process, after imagine step, do update actor and critic
         """
-        data = next(self._dataset)  # already do preprocess in dataset making
-        # data = (
-        #     self._dataset()
-        # )  # already do preprocess in dataset making, using handmade dataset generator
+        data = next(self._dataset)
+        data = utils.preprocess(data, self._c)
 
         obs, actions, obp1s, rewards, dones, discounts = (
             data["obs"],
