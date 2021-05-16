@@ -12,6 +12,7 @@ import time
 # from tensorflow.keras.mixed_precision import experimental as prec
 
 
+@tf.function
 def preprocess(episode_record, config):
     # print("preprocess episode_record:",episode_record.keys())
     # dtype = prec.global_policy().compute_dtype

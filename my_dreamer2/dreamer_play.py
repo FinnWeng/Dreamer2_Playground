@@ -433,6 +433,7 @@ class Play:
         cache[str(episode_name)] = episode
         print("the episodes size now is:", total + length, "steps")
 
+    @tf.function
     def dreaming_update(self):
         """
         using collect function

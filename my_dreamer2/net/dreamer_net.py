@@ -645,6 +645,7 @@ class Dreamer:
             return tf.clip_by_value(tfd.Normal(action, amount).sample(), -1, 1)
         raise NotImplementedError(self._c.action_noise)
 
+    @tf.function
     def policy(self, obs, training=False):
         # this combine the encoder and actor and get feat to get a totoal agent policy
         if self.state is None:
