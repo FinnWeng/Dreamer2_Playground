@@ -48,8 +48,6 @@ class Play:
         self.horizon = 15
         self.datadir = self._c.logdir / "episodes"
 
-
-
         with tf.device("cpu:1"):
             self._step = tf.Variable(count_steps(self.datadir), dtype=tf.int64)
 
@@ -223,9 +221,8 @@ class Play:
                     "obs"
                 ]  # obp1s is for redundant here
 
-                act = self.model.policy(processed_obs, training=True)[
-                    0
-                ].numpy()  # to get batch dim,
+                act, self.model.state = self.model.policy(processed_obs, training=True)
+                act = act.numpy()
 
             if self._c.is_discrete:
                 argmax_act = np.argmax(act, axis=-1)
@@ -254,7 +251,6 @@ class Play:
 
             self._step.assign_add(1)
 
-
             trainsaction = {
                 "ob": self.ob,
                 "obp1": ob,
@@ -272,8 +268,7 @@ class Play:
                 print("pre-set!")
                 done = True
                 trainsaction["done"] = done
-                trainsaction["discount"] = np.array(
-                    1 - float(done))
+                trainsaction["discount"] = np.array(1 - float(done))
 
             episode_record.append(trainsaction)
             # print(
@@ -364,7 +359,6 @@ class Play:
                 # so the structure of self.play_records is:
                 # (batch_size* batch_length*TD_size or greater , TD_size)
 
-            
             tuple_of_episode_columns = self.TD_dict_to_TD_train_data(
                 self.play_records, True
             )  # for Dreamer, the TD = 1
@@ -408,42 +402,38 @@ class Play:
     def post_process_episodes(self, cache, episode_name, episode):
         total = 0
         length = len(episode["rewards"]) - 1
-        score = float(episode['rewards'].astype(np.float64).sum())
+        score = float(episode["rewards"].astype(np.float64).sum())
         for key, ep in reversed(sorted(cache.items(), key=lambda x: x[0])):
 
             if total <= self._c.max_dataset_steps - length:
                 total += len(ep["rewards"]) - 1
             else:
                 del cache[key]
-            
+
         with self.model._writer.as_default():
             tf.summary.scalar(
-                    'dataset_size',
-                    total + length,
-                    step=self._step.numpy() * self._c.action_repeat,
-                )  # control by model.total_step, record the env total step
-            
-            tf.summary.scalar(
-                    'train_episodes',
-                    len(cache),
-                    step=self._step.numpy() * self._c.action_repeat,
-                )  # control by model.total_step, record the env total step
-            
-            tf.summary.scalar(
-                    'train_return',
-                    score,
-                    step=self._step.numpy() * self._c.action_repeat,
-                )  # control by model.total_step, record the env total step
-            
-            tf.summary.scalar(
-                    'train_length',
-                    length,
-                    step=self._step.numpy() * self._c.action_repeat,
-                )  # control by model.total_step, record the env total step
-            
+                "dataset_size",
+                total + length,
+                step=self._step.numpy() * self._c.action_repeat,
+            )  # control by model.total_step, record the env total step
 
-            
-            
+            tf.summary.scalar(
+                "train_episodes",
+                len(cache),
+                step=self._step.numpy() * self._c.action_repeat,
+            )  # control by model.total_step, record the env total step
+
+            tf.summary.scalar(
+                "train_return",
+                score,
+                step=self._step.numpy() * self._c.action_repeat,
+            )  # control by model.total_step, record the env total step
+
+            tf.summary.scalar(
+                "train_length",
+                length,
+                step=self._step.numpy() * self._c.action_repeat,
+            )  # control by model.total_step, record the env total step
 
         cache[str(episode_name)] = episode
         print("the episodes size now is:", total + length, "steps")

@@ -8,7 +8,6 @@ import pathlib
 import tensorflow as tf
 
 
-
 class AttrDict(dict):
 
     __setattr__ = dict.__setitem__
@@ -122,7 +121,6 @@ if __name__ == "__main__":
     config.eval_every //= config.action_repeat
     config.log_every //= config.action_repeat
     config.time_limit //= config.action_repeat
-
 
     # self._dataset = iter(self.load_dataset(self.datadir, self._c))
     gpus = tf.config.experimental.list_physical_devices("GPU")
