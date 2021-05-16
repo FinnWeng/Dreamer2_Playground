@@ -58,7 +58,7 @@ def define_config():
     config.pcont = True
     config.free_nats = 3.0
     config.pcont_scale = 5.0
-    config.eta_x = 1 / (64 * 64 * 3)
+    config.eta_x = 1
     config.eta_r = 1
     config.eta_gamma = 1
     config.eta_t = 0.08

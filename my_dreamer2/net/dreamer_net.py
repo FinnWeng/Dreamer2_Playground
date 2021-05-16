@@ -34,6 +34,7 @@ def world_model_imagine(fn, state_dict, action_array):
 
     return output_dict
 
+
 def world_model_imagine_fresh_action(fn, state_dict, action_array):
     """
     from state, input (action)
@@ -60,16 +61,11 @@ def world_model_imagine_fresh_action(fn, state_dict, action_array):
         )  # each is (batch_size*batch_length, horizon, 30)
         output_dict[k] = v_tensor
 
-    feats = tf.stack(
-            feat_list, 1
-        )  # each is (batch_size*batch_length, horizon, 30)
-    
-    actions = tf.stack(
-            action_list, 1
-        )  # each is (batch_size*batch_length, horizon, 30)
+    feats = tf.stack(feat_list, 1)  # each is (batch_size*batch_length, horizon, 30)
+
+    actions = tf.stack(action_list, 1)  # each is (batch_size*batch_length, horizon, 30)
 
     return output_dict, feats, actions
-
 
 
 def world_model_observing(fn, state_dict, action_array, embed_array):
@@ -168,7 +164,11 @@ class ConvDecoder(tf.keras.Model):
         x = self.get("h1", tf.keras.layers.Dense, 32 * self._depth, None)(features)
         x = tf.reshape(x, [-1, 1, 1, 32 * self._depth])
         x = self.get(
-            "h2", tf.keras.layers.Conv2DTranspose, 2 ** (4 - 0 - 2) * self._depth, 5, **kwargs
+            "h2",
+            tf.keras.layers.Conv2DTranspose,
+            2 ** (4 - 0 - 2) * self._depth,
+            5,
+            **kwargs,
         )(x)
         x = self.get(
             "h3", tf.keras.layers.Conv2DTranspose, 2 * self._depth, 5, **kwargs
@@ -275,7 +275,9 @@ class ValueDecoder(tf.keras.Model):
 
 
 class RSSM(tf.keras.Model):
-    def __init__(self, stoch=30, deter=200, hidden=200, discrete = 0, act=tf.nn.elu, cell="gru"):
+    def __init__(
+        self, stoch=30, deter=200, hidden=200, discrete=0, act=tf.nn.elu, cell="gru"
+    ):
         super(RSSM, self).__init__()
         self._stoch = stoch
         self._activation = act
@@ -329,10 +331,12 @@ class RSSM(tf.keras.Model):
         """
         if stop_grad:
             # return tfd.Independent(tfd.OneHotCategorical(tf.stop_gradient(state["logit_vector"])),1)
-            return tfd.Independent(tools.OneHotDist(tf.stop_gradient(state["logit_vector"])),1)
+            return tfd.Independent(
+                tools.OneHotDist(tf.stop_gradient(state["logit_vector"])), 1
+            )
 
         else:
-            return tfd.Independent(tools.OneHotDist(state["logit_vector"]),1)
+            return tfd.Independent(tools.OneHotDist(state["logit_vector"]), 1)
 
     @tf.function
     def img_step(self, prev_state, prev_action):
@@ -357,7 +361,9 @@ class RSSM(tf.keras.Model):
         x = self.get("img5", tf.keras.layers.Dense, self._stoch * self._discrete, None)(
             x
         )  # =>(25, 32* _stoch_size)
-        logit_vector = tf.reshape(x, [-1, self._stoch, self._discrete])  # # =>(25, 32,  _stoch_size)
+        logit_vector = tf.reshape(
+            x, [-1, self._stoch, self._discrete]
+        )  # # =>(25, 32,  _stoch_size)
 
         """
         Straight-Through Gradients trick is built-in in get_dist 
@@ -392,16 +398,20 @@ class RSSM(tf.keras.Model):
             "obs1", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
 
-        x = self.get("obs3", tf.keras.layers.Dense, self._stoch * self._discrete, None)(x)
+        x = self.get("obs3", tf.keras.layers.Dense, self._stoch * self._discrete, None)(
+            x
+        )
         # print("x:", x.shape)
-        logit_vector = tf.reshape(x, [-1, self._stoch, self._discrete])  # # =>(25, 32,  _stoch_size)
+        logit_vector = tf.reshape(
+            x, [-1, self._stoch, self._discrete]
+        )  # # =>(25, 32,  _stoch_size)
 
         """
         Straight-Through Gradients trick is built-in in get_dist 
         """
         stoch = tf.cast(
             self.get_dist({"logit_vector": logit_vector}).sample(), tf.float32
-        ) # 
+        )  #
         stoch = tf.keras.layers.Flatten()(stoch)  # # (25, 32*_stoch_size)
 
         post = {"logit_vector": logit_vector, "stoch": stoch, "deter": prior["deter"]}
@@ -477,7 +487,6 @@ class Dreamer:
         self.eta_t = config.eta_t
         self.eta_q = config.eta_q
 
-
         self.Dreamer_dynamics_path = "./model/Dreamer_dynamics.ckpt"
         self.Dreamer_encoder_path = "./model/Dreamer_encoder.ckpt"
         self.Dreamer_reward_decoder_path = "./model/Dreamer_reward_decoder.ckpt"
@@ -523,7 +532,9 @@ class Dreamer:
             init_std=self._c.action_init_std,
             act=actv,
         )
-        print("tf.zeros_like(acts.low):",tf.zeros_like(actspace.low)) # tf.Tensor([0. 0. 0. 0.], shape=(4,), dtype=float32)
+        print(
+            "tf.zeros_like(acts.low):", tf.zeros_like(actspace.low)
+        )  # tf.Tensor([0. 0. 0. 0.], shape=(4,), dtype=float32)
         self.random_actor = tools.OneHotDist(tf.zeros_like(actspace.low)[None])
 
         model_modules = [self.encoder, self.dynamics, self.decoder, self.reward_decoder]
@@ -621,7 +632,6 @@ class Dreamer:
         # this reset the state saved for RSSM forwarding
         self.state = None
 
-
     def _exploration(self, action, training):
         amount = self._c.expl_amount if training else self._c.eval_noise
         if amount == 0:
@@ -675,16 +685,14 @@ class Dreamer:
         )  # to (batch_size*batch_length,230)
         start = {k: flatten(v) for k, v in state.items()}  # flatten evey entry of dict
 
-
         def img_step_fresh_action(prev, _):
             feat = self.dynamics.get_feat(prev)
             inp = tf.stop_gradient(feat) if self._c.behavior_stop_grad else feat
             action = self.actor(inp).sample()
             succ = self.dynamics.img_step(
                 prev, action
-                    )  # the _ is where the storage action is been put
+            )  # the _ is where the storage action is been put
             return succ, feat, action
-
 
         control_array = tf.range(
             self._c.horizon
@@ -700,12 +708,15 @@ class Dreamer:
         # states" 'logit_vector': <tf.Tensor: shape=(2450, 15, 32, 32)
 
         # print('start["logit_vector"]',start["logit_vector"].shape) # (2450, 32, 32)
-        # print('start["stoch"]',start["stoch"].shape) # (2450, 1024) 
-        # print('start["deter"]',start["deter"].shape) # (2450, 800) 
+        # print('start["stoch"]',start["stoch"].shape) # (2450, 1024)
+        # print('start["deter"]',start["deter"].shape) # (2450, 800)
         # print("states['logit_vector']",states['logit_vector'].shape) # (2450, 15, 32, 32)
         # print("states['stoch']",states['stoch'].shape) # (2450, 15, 1024)
         # print("states['deter']",states['deter'].shape) # (2450, 15, 800)
-        imag_states = {k: tf.concat([tf.expand_dims(start[k],1), v[:,:-1]], 1) for k, v in states.items()}
+        imag_states = {
+            k: tf.concat([tf.expand_dims(start[k], 1), v[:, :-1]], 1)
+            for k, v in states.items()
+        }
 
         return imag_feat, imag_states, imag_action
 
@@ -802,9 +813,7 @@ class Dreamer:
 
         if self._c.future_entropy and tf.greater(self._c.actor_entropy(), 0):
             reward_pred += self._config.actor_entropy() * actor_ent
-        if self._c.future_entropy and tf.greater(
-            self._c.actor_state_entropy(), 0
-        ):
+        if self._c.future_entropy and tf.greater(self._c.actor_state_entropy(), 0):
             reward_pred += self._c.actor_state_entropy() * state_ent
 
         offical_LamR_result = self.official_lambda_return(
@@ -861,8 +870,6 @@ class Dreamer:
         kl_free = tools.schedule(self._c.kl_free, self._step)
         kl_scale = tools.schedule(self._c.kl_scale, self._step)
 
-        
-
         with tf.GradientTape() as world_tape:
             """
             the world model, which is _dynamics(RSSM)
@@ -906,7 +913,7 @@ class Dreamer:
                 pcont_target = (
                     self._c.discount * record_discounts
                 )  # all 1* discount except the done which will be 0. Explicitly make it to learn what is done state.
-                likes["pcont_prob"] = - tf.reduce_mean(
+                likes["pcont_prob"] = -tf.reduce_mean(
                     pcont_pred.log_prob(pcont_target)
                 )  # shape = (50,10)
                 likes["pcont_prob"] *= self._c.pcont_scale
@@ -921,7 +928,6 @@ class Dreamer:
             # div = tf.maximum(div, self._c.free_nats)
 
             mix = 1 - kl_balance
-
 
             value_lhs = value = tfd.kl_divergence(post_dist, stop_prior_dist)
             value_rhs = tfd.kl_divergence(stop_post_dist, prior_dist)
@@ -945,7 +951,13 @@ class Dreamer:
         # world_var.extend(self.decoder.trainable_variables)
         # world_var.extend(self.dynamics.trainable_variables)
         # world_grads = world_tape.gradient(world_loss, world_var)
-        world_model_parts = [self.encoder, self.decoder, self.dynamics,self.reward_decoder,self._pcont]
+        world_model_parts = [
+            self.encoder,
+            self.decoder,
+            self.dynamics,
+            self.reward_decoder,
+            self._pcont,
+        ]
         self.world_optimizer(world_tape, world_loss, world_model_parts)
 
         self._update_slow_target()
@@ -960,7 +972,9 @@ class Dreamer:
                 post
             )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
 
-            discount_inp = self.dynamics.get_feat(imag_state) # since the feat s prev feat
+            discount_inp = self.dynamics.get_feat(
+                imag_state
+            )  # since the feat s prev feat
             discount = self._pcont(discount_inp).mean()
             weights = tf.stop_gradient(
                 tf.math.cumprod(
@@ -969,21 +983,23 @@ class Dreamer:
             )  # not to effect the world model
             # print("weights:",weights.shape) # (2450, 14)
 
-            actor_inp = tf.stop_gradient(imag_feat) if self._c.behavior_stop_grad else imag_feat
+            actor_inp = (
+                tf.stop_gradient(imag_feat) if self._c.behavior_stop_grad else imag_feat
+            )
             policy = self.actor(actor_inp)
 
-            actor_ent = policy.entropy() # (2450, 15)
-            state_ent = self.dynamics.get_dist(imag_state).entropy() # (2450, 15, 32)
+            actor_ent = policy.entropy()  # (2450, 15)
+            state_ent = self.dynamics.get_dist(imag_state).entropy()  # (2450, 15, 32)
 
             imag_action_prob = policy.log_prob(imag_action)
             # print("imag_action_prob:", imag_action_prob) # (2450, 15)
 
-
-
-
-
             lambda_returns = self.lambda_returns(
-                imag_feat, discount, _lambda=self._c.discount_lambda,actor_ent = actor_ent, state_ent= state_ent
+                imag_feat,
+                discount,
+                _lambda=self._c.discount_lambda,
+                actor_ent=actor_ent,
+                state_ent=state_ent,
             )  # an exponentially-weighted average of the estimates V for different k to balance bias and variance
 
             value_diff = tf.stop_gradient(
@@ -1007,15 +1023,13 @@ class Dreamer:
             )
             # print("mix_actor_loss:",mix_actor_loss) # (2450, 14)
 
-            if not self._c.future_entropy and tf.greater(
-                self._c.actor_entropy(), 0
-                ):
-                mix_actor_target += self._c.actor_entropy() * actor_ent[:,:-1]
+            if not self._c.future_entropy and tf.greater(self._c.actor_entropy(), 0):
+                mix_actor_target += self._c.actor_entropy() * actor_ent[:, :-1]
             if not self._c.future_entropy and tf.greater(
                 self._c.actor_state_entropy(), 0
-                ):
+            ):
                 mix_actor_target += self._c.actor_state_entropy() * state_ent[:-1]
-            
+
             actor_loss = -tf.reduce_mean(weights * mix_actor_target)
 
         # actor_var = []
@@ -1037,9 +1051,8 @@ class Dreamer:
                 weights * -value_pred.log_prob(target)
             )  # to directy predict return. gradient is not effecting world model
 
-
         critic_model_parts = [self.critic]
-        
+
         self.actor_optimizer(actor_tape, actor_loss, actor_model_parts)
         self.critic_optimizer(critic_tape, critic_loss, critic_model_parts)
 
@@ -1082,9 +1095,6 @@ class Dreamer:
                     world_loss,
                     step=self._step.numpy() * self._c.action_repeat,
                 )
-
-                
- 
 
         if self.update_step % 2000 == 0:
             print("do image summaries saving!!")
