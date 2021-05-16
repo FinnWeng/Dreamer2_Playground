@@ -155,6 +155,7 @@ def load_dataset(episodes, config):  # load data from npz
 
     dataset = tf.data.Dataset.from_generator(generator, types, shapes)
     dataset = dataset.batch(config.batch_size, drop_remainder=True)
+    # dataset = dataset.map(functools.partial(preprocess, config=config))
     dataset = dataset.prefetch(10)
     return dataset
 

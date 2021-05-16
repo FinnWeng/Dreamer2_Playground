@@ -209,16 +209,14 @@ class Play:
 
             else:
 
-                obs = {
+                obs_data = {
                     "obs": np.array([self.ob]),
                     "obp1s": np.array([self.ob]),
                     "rewards": 0.0,
                     "discounts": 1.0,
-                }[
-                    "obs"
-                ]  # obp1s is for redundant here
+                }
 
-                act, self.model.state = self.model.policy(obs, training=True)
+                act, self.model.state = self.model.policy(obs_data, training=True)
                 act = act.numpy()
 
             if self._c.is_discrete:
@@ -496,130 +494,6 @@ class Play:
 
         self.post_process_play_records()
         return rewards_mean
-
-    def play_for_fun(self, using_random_policy=False, must_be_whole_episode=True):
-        """
-        collect end when the play_records full or episode end
-        """
-        trainsaction = {
-            "ob": self.ob,
-            "obp1": self.ob,
-            "action": np.zeros(
-                [
-                    4,
-                ]
-            ),
-            "reward": 0.0,
-            "done": 0,
-            "discount": np.array(1.0),
-        }
-
-        episode_record = [trainsaction]
-        """
-        I call this episode_record since when there's a done for playing, I must end collecting data for 
-        capturing the end score of an episode, not to mix with next episode start when doing TD.
-        It will start to train(in other words, break the loop) in two situation: 
-        first, episode is done; second, the buffer is full(>self.batch_size * self.batch_length*self.TD_size).
-        """
-        # while len(episode_record) < self.batch_size * self.batch_length * self.TD_size:
-
-        # build model by call method
-        init_obs = utils.preprocess(
-            {
-                "obs": np.array([self.ob]),
-                "obp1s": np.array([self.ob]),
-                "rewards": 0,
-            },
-            self._c,
-        )[
-            "obs"
-        ]  # obp1s is for redundant here
-
-        act = self.model.policy(init_obs, training=False)[
-            0
-        ].numpy()  # to get batch dim,
-        self.model.load_model_weights()
-
-        while True:  # stop only when episoe ends
-            # episode = []
-            # while True:
-            if using_random_policy:
-                act = self.model.random_policy_playing().numpy()  # to get batch dim
-
-            else:
-
-                processed_obs = utils.preprocess(
-                    {
-                        "obs": np.array([self.ob]),
-                        "obp1s": np.array([self.ob]),
-                        "rewards": 0,
-                    },
-                    self._c,
-                )[
-                    "obs"
-                ]  # obp1s is for redundant here
-
-                # there's no way to let model move, so I use sampling instead of mode.
-                act = self.model.policy(processed_obs, training=True)[
-                    0
-                ].numpy()  # to get batch dim,
-                print("act:", act)
-
-            if self._c.is_discrete:
-                argmax_act = np.argmax(act, axis=-1)
-
-            # # save play img
-
-            # if self.episode_step % 50000 == 0:
-            #     self.save_play_img = True
-
-            # if self.save_play_img == True:
-            #     self.RGB_array_list.append(self.env.render())
-
-            # if len(self.RGB_array_list) > 500:
-
-            #     for i in range(len(self.RGB_array_list)):
-            #         play_img = self.RGB_array_list[i]
-            #         play_img = cv2.cvtColor(play_img, cv2.COLOR_RGB2BGR)
-
-            #         cv2.imwrite("./train_gen_img/play_img_{}.jpg".format(i), play_img)
-            #     self.RGB_array_list = []
-            #     self.save_play_img = False
-
-            ob, reward, done, info = self.act_repeat(
-                self.env, argmax_act[0], rendering=True
-            )
-
-            self.total_step += 1
-            print("self.total_step:", self.total_step)
-
-            self.ob = ob
-
-            # to coumpute average reward of each step
-            self.episode_reward += reward
-            self.episode_step += 1  # to avoid devide by zero
-
-            # for first 100 batch, play just 500 step
-
-            # if self.episode_step < 50000:
-            if self.episode_step >= self._c.time_limit:
-                print("pre-set!")
-                done = True
-                self.episode_step = 1
-
-            if done:
-                print("game done!!")
-                self.env.reset()
-                self.ob, _, _, _ = self.env.step(
-                    [0]
-                )  # whether it is discrete or not, 0 is proper
-
-                average_reward = self.episode_reward / self.episode_step
-
-                # for dreamer, it need to reset state at end of every episode
-                self.model.reset()
-                self.episode_step = 1
-                break
 
     def reset_total_step(self):
         """

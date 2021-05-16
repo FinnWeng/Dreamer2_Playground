@@ -648,15 +648,15 @@ class Dreamer:
     def policy(self, obs, training=False):
         # this combine the encoder and actor and get feat to get a totoal agent policy
         if self.state is None:
-            latent = self.dynamics.initial(len(obs))
-            action = tf.zeros((len(obs), self._actdim), tf.float32)
+            obs_len = len(obs["obp1s"])
+            latent = self.dynamics.initial(obs_len)
+            action = tf.zeros((obs_len, self._actdim), tf.float32)
         else:
             latent, action = self.state
-        obs = tf.cast(
-            utils.preprocess(obs, self._c),
-            tf.float32,
-        )
-        embed = self.encoder(obs)
+
+        obs = utils.preprocess(obs, self._c)
+
+        embed = self.encoder(obs["obp1s"])
         latent, _ = self.dynamics.obs_step(
             latent, action, embed
         )  # using post, which using future state to get action # need to to slicing since here should using scan
