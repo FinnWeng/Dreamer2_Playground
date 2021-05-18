@@ -161,30 +161,3 @@ def load_dataset(episodes, config):  # load data from npz
     return dataset
 
 
-class slices_dataset_generator:
-    def __init__(self, directory, config):
-        self.directory = directory
-        self.config = config
-        self.dataset = self.reload(self.directory, self.config)
-
-    def reload(self, directory, config):
-
-        dataset_slice = load_episodes(
-            directory, config.train_steps, config.batch_length, config.dataset_balance
-        )
-        dataset = tf.data.Dataset.from_tensor_slices(dataset_slice)
-
-        dataset = dataset.batch(config.batch_size, drop_remainder=True)
-        dataset = dataset.map(functools.partial(preprocess, config=config))
-        dataset = dataset.prefetch(10)
-        return dataset.as_numpy_iterator()
-
-    def __call__(self):
-        while True:
-            try:
-                return next(self.dataset)
-
-            except (StopIteration, tf.errors.OutOfRangeError):
-                self.dataset = self.reload(self.directory, self.config)
-                print("reload dataset until success!")
-                # return next(self.dataset)

@@ -215,12 +215,21 @@ class Play:
                     "rewards": 0.0,
                     "discounts": 1.0,
                 }
+                # print('tuple_of_episode_columns[2]:',np.amax(obs_data["obp1s"]))
+                # print('tuple_of_episode_columns[2]:',np.amin(obs_data["obp1s"]))
+
 
                 act, self.model.state = self.model.policy(obs_data, training=True)
+
+                # print('tuple_of_episode_columns[2](after):',np.amax(obs_data["obp1s"]))
+                # print('tuple_of_episode_columns[2](after):',np.amin(obs_data["obp1s"]))
+                
                 act = act.numpy()
+                # print("act:",act)
 
             if self._c.is_discrete:
                 argmax_act = np.argmax(act, axis=-1)
+
 
             # # save play img
 
@@ -280,7 +289,7 @@ class Play:
             self.episode_step += 1  # to avoid devide by zero
             self.total_step += 1
             # print("self.total_step:", self.total_step)
-            print("self._step:", self._step.numpy())
+
 
             if prefill == True:
                 self.episode_step = 1
@@ -305,7 +314,11 @@ class Play:
                 average_reward = self.episode_reward / self.episode_step
 
                 # for dreamer, it need to reset state at end of every episode
-                self.model.reset()
+                if self.model.state is not None and np.array([done]).any():
+                    mask = tf.cast(1 - np.array([done]), tf.float32)[:, None]
+                    self.model.state = tf.nest.map_structure(lambda x: x * mask, self.model.state)
+                else:
+                    self.model.reset()
 
                 # if len(episode_record) < self.TD_size:
                 if len(episode_record) < self.batch_length * self.TD_size:
@@ -341,14 +354,14 @@ class Play:
         if len(episode_record) > 1:
             # tranfer data to TD dict
             for i in range(
-                (len(episode_record) // self.TD_size) + 1
-            ):  # +1 for take the last step of play
+                (len(episode_record) // self.TD_size)
+            ):  
 
                 TD_data = episode_record[i * self.TD_size : (i + 1) * self.TD_size]
                 if (
                     len(TD_data) != self.TD_size
                 ):  # to deal with +1 causing not enough data of a TD size
-                    print("reverse take for taking just to end of episode")
+                    # print("reverse take for taking just to end of episode")
                     TD_data = episode_record[-self.TD_size :]
                 self.play_records.append(TD_data)
                 # so the structure of self.play_records is:
@@ -366,6 +379,10 @@ class Play:
                 "dones": tuple_of_episode_columns[4],
                 "discounts": tuple_of_episode_columns[5],
             }
+            # obp1s_array = np.array(tuple_of_episode_columns[2])
+            # print('tuple_of_episode_columns[2]:',np.amax(obp1s_array))
+            # print('tuple_of_episode_columns[2]:',np.amin(obp1s_array))
+            
 
             # reset the inner buffer
             filename = utils.save_episode(self.datadir, dict_of_episode_record)
@@ -433,7 +450,7 @@ class Play:
         cache[str(episode_name)] = episode
         print("the episodes size now is:", total + length, "steps")
 
-    @tf.function
+    # @tf.function
     def dreaming_update(self):
         """
         using collect function
@@ -464,7 +481,11 @@ class Play:
         4. in each batch process, after imagine step, do update actor and critic
         """
         data = next(self._dataset)
+        # print('tuple_of_episode_columns[2]:',np.amax(data["obp1s"]))
+        # print('tuple_of_episode_columns[2]:',np.amin(data["obp1s"]))
+
         data = utils.preprocess(data, self._c)
+
 
         obs, actions, obp1s, rewards, dones, discounts = (
             data["obs"],

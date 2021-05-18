@@ -90,7 +90,7 @@ def define_config():
     config.value_grad_clip = 100.0
     config.opt_eps = 1e-5
     config.dataset_balance = False
-    config.kl_balance = 0.8
+    config.kl_balance = "0.8"
     config.kl_scale = 0.1
     config.kl_free = 0.0
     # Behavior.

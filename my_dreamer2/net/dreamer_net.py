@@ -76,7 +76,6 @@ def world_model_observing(fn, state_dict, action_array, embed_array):
     action: (25, 50, 4)
     action_array: (batch_size, horizon,act_dim)
     """
-    current_state = state_dict
     post_output_dict = {}
     prior_output_dict = {}
     post_dict_list = []
@@ -87,10 +86,10 @@ def world_model_observing(fn, state_dict, action_array, embed_array):
     for i in range(action_array.shape[1]):
         # print("action_array[:, i, :]:", action_array[:, i, :].shape) # (batch_size,4)
         # print("embed_array[:, i, :]", embed_array[:, i, :].shape) # (batch_size,1024)
-        post_state, prior_state = fn(
+        current_state, prior_state = fn(
             current_state, action_array[:, i, :], embed_array[:, i, :]
         )
-        post_dict_list.append(post_state)
+        post_dict_list.append(current_state)
         prior_dict_list.append(prior_state)
     for k, v in state_dict.items():
         post_v_list = [
@@ -351,11 +350,14 @@ class RSSM(tf.keras.Model):
         x = self.get(
             "img1", tf.keras.layers.Dense, self._hidden_size, self._activation
         )(x)
-        x, deter = self._cell(
-            x, [prev_state["deter"]]
-        )  # (output, next_state) = call(input, state)
+        deter = prev_state["deter"]
+        x, deter = self._cell(x, [deter])  # (output, next_state) = call(input, state)
         # x: (25, 200)
         deter = deter[0]  # Keras wraps the state in a list.
+
+        x = self.get(
+            "img2", tf.keras.layers.Dense, self._hidden_size, self._activation
+        )(x)
 
         # below is VAE prior, which means P(z|x)
         x = self.get("img5", tf.keras.layers.Dense, self._stoch * self._discrete, None)(
@@ -540,14 +542,6 @@ class Dreamer:
         model_modules = [self.encoder, self.dynamics, self.decoder, self.reward_decoder]
         self.state = None
 
-        # self.encoder_tffn = tf.function(self.encoder)
-        # self.actor_tffn = tf.function(self.actor)
-        # self.critic_tffn = tf.function(self.critic)
-
-        # self.world_optimizer = tf.optimizers.Adam(self._c.model_lr)
-        # self.actor_optimizer = tf.optimizers.Adam(self._c.actor_lr)
-        # self.critic_optimizer = tf.optimizers.Adam(self._c.value_lr)
-
         self.world_optimizer = tools.Optimizer(
             "world",
             self._c.model_lr,
@@ -655,9 +649,7 @@ class Dreamer:
         else:
             latent, action = self.state
 
-        obs = utils.preprocess(obs, self._c)
-
-        embed = self.encoder(obs["obp1s"])
+        embed = self.encoder(utils.preprocess(obs, self._c)["obp1s"])
         latent, _ = self.dynamics.obs_step(
             latent, action, embed
         )  # using post, which using future state to get action # need to to slicing since here should using scan
@@ -870,11 +862,10 @@ class Dreamer:
         rewards = tf.cast(rewards, tf.float32)
         record_discounts = tf.cast(record_discounts, tf.float32)
 
-        kl_balance = tools.schedule(self._c.kl_balance, self._step)
-        kl_free = tools.schedule(self._c.kl_free, self._step)
-        kl_scale = tools.schedule(self._c.kl_scale, self._step)
-
         with tf.GradientTape() as world_tape:
+            kl_balance = tools.schedule(self._c.kl_balance, self._step)
+            kl_free = tools.schedule(self._c.kl_free, self._step)
+            kl_scale = tools.schedule(self._c.kl_scale, self._step)
             """
             the world model, which is _dynamics(RSSM)
             """
@@ -1016,7 +1007,7 @@ class Dreamer:
             actor_target = imag_action_prob[:, :-1] * value_diff
 
             # print("lambda_returns: ", lambda_returns.shape)  # (14, 2450)
-            # print("actor_loss:",actor_loss.shape) # (2450, 14)
+            # print("actor_target:",actor_target.shape) # (2450, 14)
             # print("discount:",discount.shape) # (2450, 14)
 
             actor_mix = self._c.imag_gradient_mix()
@@ -1025,7 +1016,7 @@ class Dreamer:
                 tf.transpose(lambda_returns, [1, 0]) * actor_mix
                 + (1 - actor_mix) * actor_target
             )
-            # print("mix_actor_loss:",mix_actor_loss) # (2450, 14)
+            # print("mix_actor_target:",mix_actor_target) # (2450, 14)
 
             if not self._c.future_entropy and tf.greater(self._c.actor_entropy(), 0):
                 mix_actor_target += self._c.actor_entropy() * actor_ent[:, :-1]

@@ -64,7 +64,7 @@ class Gym_Wrapper:
     def reset(self):
 
         image = self._env.reset()
-        print("image:",image.shape)
+        # print("image:",image.shape)
         if self._grayscale:
             image = image[..., None]
         return image
@@ -74,6 +74,8 @@ class Gym_Wrapper:
         # ob, reward, done, info = self._env(action)
 
         ob, reward, done, _ = self._env.step(action)
+                
+
 
         if self._grayscale:
             ob = ob[..., None]
