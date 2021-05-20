@@ -153,5 +153,5 @@ if __name__ == "__main__":
             using_random_policy=False, must_be_whole_episode=False, prefill=False
         )
         print("play_process.play_records:", len(play_process.play_records))
-        mean_reward = play_process.dreaming_update()
-        print("rewards:", mean_reward)
+        # mean_reward = play_process.dreaming_update()
+        # print("rewards:", mean_reward)

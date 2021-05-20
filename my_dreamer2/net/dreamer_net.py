@@ -83,9 +83,11 @@ def world_model_observing(fn, state_dict, action_array, embed_array):
     current_state = state_dict
     output_dict = {}
 
+    # print("action_array:", action_array.shape) # (32, 50, 18) 
+    # print("embed_array:", embed_array.shape) # (32, 50, 1536)
+
     for i in range(action_array.shape[1]):
-        # print("action_array[:, i, :]:", action_array[:, i, :].shape) # (batch_size,4)
-        # print("embed_array[:, i, :]", embed_array[:, i, :].shape) # (batch_size,1024)
+
         current_state, prior_state = fn(
             current_state, action_array[:, i, :], embed_array[:, i, :]
         )
@@ -133,14 +135,16 @@ class ConvEncoder(tf.keras.Model):
         x = self.l3(x)  # (1, 6, 6, 128)
         x = self.l4(x)  # (1, 2, 2, 256)
         # x = self.l5(x)
+        # print("x_shape:",x.shape) # (2500, 2, 2, 384)
 
         hw_shape = tf.shape(x)[1:3]
 
         out_shape = tf.concat(
             [tf.shape(obs)[:-3], [hw_shape[0] * hw_shape[1] * 8 * self.filters]], 0
         )  # 8*2*2 = 32
+        # print("out_shape:",out_shape) # [  50   50 1536]
 
-        return tf.reshape(x, out_shape)  # tf.Tensor([   1    1 1024]
+        return tf.reshape(x, out_shape) 
 
 
 class ConvDecoder(tf.keras.Model):
@@ -323,19 +327,12 @@ class RSSM(tf.keras.Model):
         """
         return tf.concat([state["stoch"], state["deter"]], -1)
 
-    def get_dist(self, state, stop_grad=False):
+    def get_dist(self, state):
         """
         # def get_dist(self, state):
         #     return tfd.MultivariateNormalDiag(state["mean"], state["std"])
         """
-        if stop_grad:
-            # return tfd.Independent(tfd.OneHotCategorical(tf.stop_gradient(state["logit_vector"])),1)
-            return tfd.Independent(
-                tools.OneHotDist(tf.stop_gradient(state["logit_vector"])), 1
-            )
-
-        else:
-            return tfd.Independent(tools.OneHotDist(state["logit_vector"]), 1)
+        return tfd.Independent(tools.OneHotDist(state["logit_vector"]), 1)
 
     @tf.function
     def img_step(self, prev_state, prev_action):
@@ -395,6 +392,8 @@ class RSSM(tf.keras.Model):
         # print('prior["deter"]:', prior["deter"].shape)  # (batch_size, 200)
 
         # below gets posterior of VAE
+        # print("prior['deter']:",prior['deter'].shape) # (batch_size, 600)
+        # print("embed:",embed.shape)  # batch_size, 1536
         x = tf.concat([prior["deter"], embed], -1)  # concat state and observation
         x = self.get(
             "obs1", tf.keras.layers.Dense, self._hidden_size, self._activation
@@ -436,10 +435,10 @@ class RSSM(tf.keras.Model):
         """
         using obs_step to acturely do observe since it need to do transpose
         """
-        # embed  (25, 50, 1024)
-        # action (25, 50, 4)
+   
         if state is None:
             state = self.initial(tf.shape(action)[0])
+        # print("observe_embed:",embed.shape) # (batch, length, 1536)
 
         post, prior = world_model_observing(
             self.obs_step, state, action, embed
@@ -685,6 +684,8 @@ class Dreamer:
             feat = self.dynamics.get_feat(prev)
             inp = tf.stop_gradient(feat) if self._c.behavior_stop_grad else feat
             action = self.actor(inp).sample()
+            # print('prev["stoch"].shape:',prev["stoch"].shape) # (batch_size*(batch_length-1), 1024)
+            # print("action.shape:",action.shape) # (batch_size*(batch_length-1), 18)
             succ = self.dynamics.img_step(
                 prev, action
             )  # the _ is where the storage action is been put
@@ -694,6 +695,7 @@ class Dreamer:
             self._c.horizon
         )  # now ths action is only for control iteration times. So I called it control array
         control_array = tf.reshape(control_array, [1, -1, 1])
+        
         states, imag_feat, imag_action = world_model_imagine_fresh_action(
             img_step_fresh_action, start, control_array
         )  # each is (batch_length*batch_length, horizon, 30)
@@ -750,7 +752,7 @@ class Dreamer:
         type 2. decide a k for imagine steps. befor k, using world model, after k, use critic
         type 3. consider all k and take sum of all type 2 till H - 1. use critic for H(orizon) step
         """
-        # img_feat = # (1225,15, 230)
+        # print("img_feat:",img_feat.shape) # (1568, 15, 1624)
 
         reward_pred = self.reward_decoder(
             img_feat
@@ -811,6 +813,8 @@ class Dreamer:
             reward_pred += self._config.actor_entropy() * actor_ent
         if self._c.future_entropy and tf.greater(self._c.actor_state_entropy(), 0):
             reward_pred += self._c.actor_state_entropy() * state_ent
+        
+        
 
         offical_LamR_result = self.official_lambda_return(
             reward_pred[:-1],
@@ -905,26 +909,25 @@ class Dreamer:
                 self._c.pcont
             ):  # for my aspect, this will make model to learn which step to focus by itself.
                 pcont_pred = self._pcont(feat)
-                pcont_target = (
-                    self._c.discount * record_discounts
-                )  # all 1* discount except the done which will be 0. Explicitly make it to learn what is done state.
-                likes["pcont_prob"] = -tf.reduce_mean(
+                pcont_target =  record_discounts # all 1* discount except the done which will be 0. Explicitly make it to learn what is done state.
+                likes["pcont_prob"] = -self._c.pcont_scale*tf.reduce_mean(
                     pcont_pred.log_prob(pcont_target)
                 )  # shape = (50,10)
-                likes["pcont_prob"] *= self._c.pcont_scale
+            
+            sg = lambda x: tf.nest.map_structure(tf.stop_gradient, x)
 
             prior_dist = self.dynamics.get_dist(prior)
-            stop_prior_dist = self.dynamics.get_dist(prior, stop_grad=True)
+            stop_prior_dist = self.dynamics.get_dist(sg(prior))
 
             post_dist = self.dynamics.get_dist(post)
-            stop_post_dist = self.dynamics.get_dist(post, stop_grad=True)
+            stop_post_dist = self.dynamics.get_dist(sg(post))
 
             # div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
             # div = tf.maximum(div, self._c.free_nats)
 
             mix = 1 - kl_balance
 
-            value_lhs = value = tfd.kl_divergence(post_dist, stop_prior_dist)
+            value_lhs = kl_value = tfd.kl_divergence(post_dist, stop_prior_dist)
             value_rhs = tfd.kl_divergence(stop_post_dist, prior_dist)
             loss_lhs = tf.maximum(tf.reduce_mean(value_lhs), kl_free)
             loss_rhs = tf.maximum(tf.reduce_mean(value_rhs), kl_free)
@@ -962,6 +965,7 @@ class Dreamer:
             drop_last = lambda x: x[:, :-1, :]
             post = {k: drop_last(v) for k, v in post.items()}
 
+            # print('post["stoch"].shape:',post["stoch"].shape) # (batch_size, batch_length-1, 1024)
             # post:
             imag_feat, imag_state, imag_action = self.imagine_ahead(
                 post
@@ -1088,6 +1092,24 @@ class Dreamer:
                 tf.summary.scalar(
                     "world_loss",
                     world_loss,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+
+                tf.summary.scalar(
+                    "images_prob",
+                    likes["images_prob"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+
+                tf.summary.scalar(
+                    "rewards_prob",
+                    likes["rewards_prob"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+
+                tf.summary.scalar(
+                    "pcont_prob",
+                    likes["pcont_prob"],
                     step=self._step.numpy() * self._c.action_repeat,
                 )
 
