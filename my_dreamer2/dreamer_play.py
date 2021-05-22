@@ -40,12 +40,10 @@ class Play:
         self.advantage = True
 
         self.total_step = 1
-        self.exploration_rate = 0.0  # the exploration is in dreamer_net
         self.save_play_img = False
         self.RGB_array_list = []
         self.episode_reward = 0
         self.episode_step = 1  # to avoid devide by zero
-        self.horizon = 15
         self.datadir = self._c.logdir / "episodes"
 
         with tf.device("cpu:1"):
@@ -218,18 +216,16 @@ class Play:
                 # print('tuple_of_episode_columns[2]:',np.amax(obs_data["obp1s"]))
                 # print('tuple_of_episode_columns[2]:',np.amin(obs_data["obp1s"]))
 
-
                 act, self.model.state = self.model.policy(obs_data, training=True)
 
                 # print('tuple_of_episode_columns[2](after):',np.amax(obs_data["obp1s"]))
                 # print('tuple_of_episode_columns[2](after):',np.amin(obs_data["obp1s"]))
-                
+
                 act = act.numpy()
                 # print("act:",act)
 
             if self._c.is_discrete:
                 argmax_act = np.argmax(act, axis=-1)
-
 
             # # save play img
 
@@ -290,7 +286,6 @@ class Play:
             self.total_step += 1
             # print("self.total_step:", self.total_step)
 
-
             if prefill == True:
                 self.episode_step = 1
                 # self.total_step = 1
@@ -316,7 +311,9 @@ class Play:
                 # for dreamer, it need to reset state at end of every episode
                 if self.model.state is not None and np.array([done]).any():
                     mask = tf.cast(1 - np.array([done]), tf.float32)[:, None]
-                    self.model.state = tf.nest.map_structure(lambda x: x * mask, self.model.state)
+                    self.model.state = tf.nest.map_structure(
+                        lambda x: x * mask, self.model.state
+                    )
                 else:
                     self.model.reset()
 
@@ -353,9 +350,7 @@ class Play:
         """
         if len(episode_record) > 1:
             # tranfer data to TD dict
-            for i in range(
-                (len(episode_record) // self.TD_size)
-            ):  
+            for i in range((len(episode_record) // self.TD_size)):
 
                 TD_data = episode_record[i * self.TD_size : (i + 1) * self.TD_size]
                 if (
@@ -382,7 +377,6 @@ class Play:
             # obp1s_array = np.array(tuple_of_episode_columns[2])
             # print('tuple_of_episode_columns[2]:',np.amax(obp1s_array))
             # print('tuple_of_episode_columns[2]:',np.amin(obp1s_array))
-            
 
             # reset the inner buffer
             filename = utils.save_episode(self.datadir, dict_of_episode_record)
@@ -485,7 +479,6 @@ class Play:
         # print('tuple_of_episode_columns[2]:',np.amin(data["obp1s"]))
 
         data = utils.preprocess(data, self._c)
-
 
         obs, actions, obp1s, rewards, dones, discounts = (
             data["obs"],

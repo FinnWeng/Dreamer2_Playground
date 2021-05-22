@@ -18,7 +18,7 @@ class Gym_Wrapper:
 
         self.crop_size = (160, 160)
         self.resize_size = (64, 64)
-        self._actionRepeat = 4
+        self._actionRepeat = action_repeat
         self._observation = []
         # self.action_space = self._env.action_space
         import gym.wrappers
@@ -60,7 +60,6 @@ class Gym_Wrapper:
         high = np.where(self._mask, np.ones_like(self._low), self._high)
         return gym.spaces.Box(low, high, dtype=np.float32)
 
-
     def reset(self):
 
         image = self._env.reset()
@@ -74,8 +73,6 @@ class Gym_Wrapper:
         # ob, reward, done, info = self._env(action)
 
         ob, reward, done, _ = self._env.step(action)
-                
-
 
         if self._grayscale:
             ob = ob[..., None]

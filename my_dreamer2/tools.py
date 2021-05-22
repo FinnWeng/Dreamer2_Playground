@@ -252,6 +252,8 @@ class Optimizer(tf.Module):
     def __call__(self, tape, loss, modules):
         modules = modules if hasattr(modules, "__len__") else (modules,)
         varibs = tf.nest.flatten([module.variables for module in modules])
+        # count = sum(np.prod(x.shape) for x in varibs)
+        # print(f"Found {count} {self._name} parameters.")
         grads = tape.gradient(loss, varibs)
         norm = tf.linalg.global_norm(grads)
         if self._clip:
@@ -263,12 +265,14 @@ class Optimizer(tf.Module):
         self._opt.apply_gradients(zip(grads, varibs))
 
     def _apply_weight_decay(self, varibs):
+        """
+        The self._wd_pattern is trivial, so actually it doesn't apply any weight decay
+        """
         nontrivial = self._wd_pattern != r".*"
         if nontrivial:
-            # print("Applied weight decay to variables:")
-            pass
+            print("Applied weight decay to variables:")
         for var in varibs:
-            # # if re.search(self._wd_pattern, self._name + '/' + var.name):
-            # if nontrivial:
-            #     print("- " + self._name + "/" + var.name)
-            var.assign((1 - self._wd) * var)
+            if re.search(self._wd_pattern, self._name + "/" + var.name):
+                if nontrivial:
+                    print("- " + self._name + "/" + var.name)
+                var.assign((1 - self._wd) * var)

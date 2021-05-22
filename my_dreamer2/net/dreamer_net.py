@@ -83,7 +83,7 @@ def world_model_observing(fn, state_dict, action_array, embed_array):
     current_state = state_dict
     output_dict = {}
 
-    # print("action_array:", action_array.shape) # (32, 50, 18) 
+    # print("action_array:", action_array.shape) # (32, 50, 18)
     # print("embed_array:", embed_array.shape) # (32, 50, 1536)
 
     for i in range(action_array.shape[1]):
@@ -144,7 +144,7 @@ class ConvEncoder(tf.keras.Model):
         )  # 8*2*2 = 32
         # print("out_shape:",out_shape) # [  50   50 1536]
 
-        return tf.reshape(x, out_shape) 
+        return tf.reshape(x, out_shape)
 
 
 class ConvDecoder(tf.keras.Model):
@@ -271,7 +271,7 @@ class ValueDecoder(tf.keras.Model):
         mean = tf.reshape(mean, tf.concat([tf.shape(features)[:-1], self._shape], 0))
         # print("x:",x.shape)
         if self._dist == "normal":
-            return tfd.Independent(tfd.Normal(mean, 1), len(self._shape))
+            return tfd.Independent(tfd.Normal(mean, 1.0), len(self._shape))
         if self._dist == "binary":
             return tfd.Independent(tfd.Bernoulli(mean), len(self._shape))
         raise NotImplementedError(self._dist)
@@ -435,7 +435,7 @@ class RSSM(tf.keras.Model):
         """
         using obs_step to acturely do observe since it need to do transpose
         """
-   
+
         if state is None:
             state = self.initial(tf.shape(action)[0])
         # print("observe_embed:",embed.shape) # (batch, length, 1536)
@@ -475,7 +475,6 @@ class Dreamer:
         # self.observation_dim = env.observation_dim # 57
         self.observation_dim = len(env._observation)
         self.filters = 4
-        self.activation_fn = tf.keras.layers.PReLU
         self.hidden_size = 20
 
         self.lr = 1e-5
@@ -547,7 +546,7 @@ class Dreamer:
             self._c.opt_eps,
             self._c.grad_clip,
             self._c.weight_decay,
-            self._c.opt,
+            opt=self._c.opt,
         )
         self.actor_optimizer = tools.Optimizer(
             "actor",
@@ -555,7 +554,7 @@ class Dreamer:
             self._c.opt_eps,
             self._c.actor_grad_clip,
             self._c.weight_decay,
-            self._c.opt,
+            opt=self._c.opt,
         )
         self.critic_optimizer = tools.Optimizer(
             "critic",
@@ -563,7 +562,7 @@ class Dreamer:
             self._c.opt_eps,
             self._c.value_grad_clip,
             self._c.weight_decay,
-            self._c.opt,
+            opt=self._c.opt,
         )
 
         self._writer = tf.summary.create_file_writer(
@@ -695,7 +694,7 @@ class Dreamer:
             self._c.horizon
         )  # now ths action is only for control iteration times. So I called it control array
         control_array = tf.reshape(control_array, [1, -1, 1])
-        
+
         states, imag_feat, imag_action = world_model_imagine_fresh_action(
             img_step_fresh_action, start, control_array
         )  # each is (batch_length*batch_length, horizon, 30)
@@ -813,8 +812,6 @@ class Dreamer:
             reward_pred += self._config.actor_entropy() * actor_ent
         if self._c.future_entropy and tf.greater(self._c.actor_state_entropy(), 0):
             reward_pred += self._c.actor_state_entropy() * state_ent
-        
-        
 
         offical_LamR_result = self.official_lambda_return(
             reward_pred[:-1],
@@ -909,11 +906,11 @@ class Dreamer:
                 self._c.pcont
             ):  # for my aspect, this will make model to learn which step to focus by itself.
                 pcont_pred = self._pcont(feat)
-                pcont_target =  record_discounts # all 1* discount except the done which will be 0. Explicitly make it to learn what is done state.
-                likes["pcont_prob"] = -self._c.pcont_scale*tf.reduce_mean(
+                pcont_target = record_discounts  # all 1* discount except the done which will be 0. Explicitly make it to learn what is done state.
+                likes["pcont_prob"] = -self._c.pcont_scale * tf.reduce_mean(
                     pcont_pred.log_prob(pcont_target)
                 )  # shape = (50,10)
-            
+
             sg = lambda x: tf.nest.map_structure(tf.stop_gradient, x)
 
             prior_dist = self.dynamics.get_dist(prior)

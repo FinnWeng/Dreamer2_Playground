@@ -73,7 +73,7 @@ def define_config():
     config.train_every = 16
     config.train_steps = 100
     # config.max_dataset_steps = 7 * 1e5
-    config.max_dataset_steps = 1e6
+    config.max_dataset_steps = 2e6
     config.oversample_ends = True
     config.slow_value_target = True
     config.slow_actor_target = True
@@ -131,7 +131,9 @@ if __name__ == "__main__":
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
 
-    wrapped_gym = Gym_Wrapper(
+    mode = "train"
+
+    train_wrapped_gym = Gym_Wrapper(
         config.task,
         config.action_repeat,
         config.size,
@@ -141,7 +143,7 @@ if __name__ == "__main__":
         all_actions=True,
     )
 
-    play_process = dreamer_play.Play(wrapped_gym, Dreamer, config)
+    play_process = dreamer_play.Play(train_wrapped_gym, Dreamer, config)
 
     while True:
         """
