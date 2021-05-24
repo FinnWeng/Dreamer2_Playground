@@ -208,7 +208,6 @@ def static_scan(fn, inputs, start, reverse=False):
         indices = reversed(indices)
     for index in indices:
         inp = tf.nest.map_structure(lambda x: x[index], inputs)
-
         last = fn(last, inp)
         [o.append(l) for o, l in zip(outputs, tf.nest.flatten(last))]
     if reverse:

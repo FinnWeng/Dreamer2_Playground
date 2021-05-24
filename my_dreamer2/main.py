@@ -38,7 +38,7 @@ def define_config():
     config.action_repeat = 4
     config.eval_noise = 0.0
     config.time_limit = 108000
-    config.prefill = 50000
+    config.prefill = 500
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
@@ -56,13 +56,11 @@ def define_config():
     config.cnn_depth = 48
     #   config.pcont = False
     config.pcont = True
-    config.free_nats = 3.0
     config.pcont_scale = 5.0
     config.eta_x = 1
     config.eta_r = 1
-    config.eta_gamma = 1
-    config.eta_t = 0.08
-    config.eta_q = 0.02
+
+
     config.weight_decay = 1e-6
 
     # Training.
@@ -71,7 +69,7 @@ def define_config():
     config.batch_length = 50
     # config.batch_length = 10
     config.train_every = 16
-    config.train_steps = 100
+
     # config.max_dataset_steps = 7 * 1e5
     config.max_dataset_steps = 2e6
     config.oversample_ends = True

@@ -202,6 +202,7 @@ class Play:
         while True:  # stop only when episoe ends
             # episode = []
             # while True:
+
             if using_random_policy:
                 act = self.model.random_policy().numpy()  # to get batch dim
 
