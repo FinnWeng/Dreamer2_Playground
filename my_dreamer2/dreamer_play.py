@@ -21,6 +21,7 @@ class Play:
 
         self._c = config
         self._precision = config.precision
+        self._float = prec.global_policy().compute_dtype
 
         # self.ob, _, _, _ = self.env.step(
         #     self.env._env.action_space.sample()

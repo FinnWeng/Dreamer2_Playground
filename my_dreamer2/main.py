@@ -8,6 +8,11 @@ import pathlib
 import tensorflow as tf
 from tensorflow.keras.mixed_precision import experimental as prec
 
+# import warnings
+# warnings.filterwarnings("ignore", ".*box bound precision lowered.*")
+# warnings.filterwarnings("ignore", ".*TensorFloat-32 matmul/conv*")
+# tf.get_logger().setLevel("ERROR")
+
 
 
 class AttrDict(dict):
@@ -126,7 +131,7 @@ if __name__ == "__main__":
     # self._dataset = iter(self.load_dataset(self.datadir, self._c))
     gpus = tf.config.experimental.list_physical_devices("GPU")
 
-    # tf.config.experimental.set_visible_devices(gpus[1], "GPU")
+    tf.config.experimental.set_visible_devices(gpus[1], "GPU")
     if gpus:
         # Currently, memory growth needs to be the same across GPUs
         for gpu in gpus:

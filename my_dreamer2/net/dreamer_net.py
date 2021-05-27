@@ -454,11 +454,11 @@ class RSSM(tf.keras.Model):
         
         sg = lambda x: tf.nest.map_structure(tf.stop_gradient, x)
 
-        prior_dist = self.get_dist(prior)
-        stop_prior_dist = self.get_dist(sg(prior))
+        prior_dist = self.get_dist(prior, tf.float32)
+        stop_prior_dist = self.get_dist(sg(prior), tf.float32)
 
-        post_dist = self.get_dist(post)
-        stop_post_dist = self.get_dist(sg(post))
+        post_dist = self.get_dist(post, tf.float32)
+        stop_post_dist = self.get_dist(sg(post), tf.float32)
 
         # div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
 
@@ -919,11 +919,11 @@ class Dreamer:
             #     "image_pred:", image_pred.batch_shape, image_pred.event_shape
             # )  # (50, 10) (64, 64, 3)
             likes["images_prob"] = -self.eta_x * tf.reduce_mean(
-                image_pred.log_prob(tf.cast(obp1s),tf.float32)
+                image_pred.log_prob(tf.cast(obp1s,tf.float32))
             )
             # print("rewards")
             likes["rewards_prob"] = -self.eta_r * tf.reduce_mean(
-                reward_pred.log_prob(tf.cast(rewards),tf.float32)
+                reward_pred.log_prob(tf.cast(rewards,tf.float32))
             )
             if (
                 self._c.pcont
@@ -931,7 +931,7 @@ class Dreamer:
                 pcont_pred = self._pcont(feat, tf.float32)
                 pcont_target = record_discounts  # all 1* discount except the done which will be 0. Explicitly make it to learn what is done state.
                 likes["pcont_prob"] = -self._c.pcont_scale * tf.reduce_mean(
-                    pcont_pred.log_prob(tf.cast(pcont_target),tf.float32)
+                    pcont_pred.log_prob(tf.cast(pcont_target,tf.float32))
                 )  # shape = (50,10)
 
             kl_loss, kl_value = self.dynamics.kl_loss(post, prior, self._c.kl_forward, kl_balance, kl_free, kl_scale)
@@ -1047,7 +1047,7 @@ class Dreamer:
 
         with tf.GradientTape() as critic_tape:
 
-            value_pred = self.critic(imag_feat)[:, :-1]
+            value_pred = self.critic(imag_feat, tf.float32)[:, :-1]
             # print("value_pred:",value_pred.mean().shape)
 
             target = tf.stop_gradient(tf.transpose(_lambda_returns, [1, 0]))
