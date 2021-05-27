@@ -957,7 +957,7 @@ class Dreamer:
             self.reward_decoder,
             self._pcont,
         ]
-        self.world_optimizer(world_tape, world_loss, world_model_parts)
+        world_model_metrics = self.world_optimizer(world_tape, world_loss, world_model_parts)
 
         self._update_slow_target()
 
@@ -1058,8 +1058,8 @@ class Dreamer:
 
         critic_model_parts = [self.critic]
 
-        self.actor_optimizer(actor_tape, actor_loss, actor_model_parts)
-        self.critic_optimizer(critic_tape, critic_loss, critic_model_parts)
+        actor_metrics = self.actor_optimizer(actor_tape, actor_loss, actor_model_parts)
+        critic_metrics = self.critic_optimizer(critic_tape, critic_loss, critic_model_parts)
 
         if self.update_step % 2000 == 0:
             self.dynamics.save_weights(self.Dreamer_dynamics_path)
@@ -1079,6 +1079,7 @@ class Dreamer:
                     actor_loss,
                     step=self._step.numpy() * self._c.action_repeat,
                 )
+
                 tf.summary.scalar(
                     "actor_ent",
                     tf.reduce_mean(actor_ent),
@@ -1149,6 +1150,70 @@ class Dreamer:
                     tf.reduce_mean(kl_value),
                     step=self._step.numpy() * self._c.action_repeat,
                 )
+
+                tf.summary.scalar(
+                    "optimizer_actor_loss",
+                    actor_metrics["actor_loss"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "optimizer_world_loss",
+                    world_model_metrics["world_loss"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "optimizer_critic_loss",
+                    critic_metrics["critic_loss"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+
+                # tf.summary.scalar(
+                #     "optimizer_actor_norm",
+                #     actor_metrics["actor_norm"],
+                #     step=self._step.numpy() * self._c.action_repeat,
+                # )
+                # tf.summary.scalar(
+                #     "optimizer_world_norm",
+                #     world_model_metrics["world_norm"],
+                #     step=self._step.numpy() * self._c.action_repeat,
+                # )
+                # tf.summary.scalar(
+                #     "optimizer_critic_norm",
+                #     critic_metrics["critic_norm"],
+                #     step=self._step.numpy() * self._c.action_repeat,
+                # )
+
+                tf.summary.scalar(
+                    "optimizer_actor_grad_norm",
+                    actor_metrics["actor_grad_norm"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "optimizer_world_grad_norm",
+                    world_model_metrics["world_grad_norm"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "optimizer_critic_grad_norm",
+                    critic_metrics["critic_grad_norm"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+
+                tf.summary.scalar(
+                    "optimizer_actor_loss_scale",
+                    actor_metrics["actor_loss_scale"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "optimizer_world_loss_scale",
+                    world_model_metrics["world_loss_scale"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "optimizer_critic_loss_scale",
+                    critic_metrics["critic_loss_scale"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
                 
 
         if self.update_step % 2000 == 0:
@@ -1164,6 +1229,7 @@ class Dreamer:
         # print("data['obs']:", data["obs"].shape) #  (50, 10, 64, 64, 1)
 
         truth = data["obp1s"][:6] + 0.5
+        truth = tf.cast(truth, tf.float32)
         recon = image_pred.mode()[:6]
         init, _ = self.dynamics.observe(
             embed[:6, :5], data["actions"][:6, :5]
@@ -1171,6 +1237,8 @@ class Dreamer:
         init = {k: v[:, -1] for k, v in init.items()}
         prior = self.dynamics.imagine(data["actions"][:6, 5:], init)  # scaning
         openl = self.decoder(self.dynamics.get_feat(prior)).mode()
+        openl = tf.cast(openl, tf.float32)
+
         model = tf.concat([recon[:, :5] + 0.5, openl + 0.5], 1)
         error = (model - truth + 1) / 2
         openl = tf.concat([truth, model, error], 2)

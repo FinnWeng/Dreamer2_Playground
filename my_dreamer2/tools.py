@@ -276,12 +276,25 @@ class Optimizer(tf.Module):
             self._opt = prec.LossScaleOptimizer(self._opt, "dynamic")
 
     def __call__(self, tape, loss, modules):
+        assert loss.dtype is tf.float32, self._name
         modules = modules if hasattr(modules, "__len__") else (modules,)
         varibs = tf.nest.flatten([module.variables for module in modules])
         # count = sum(np.prod(x.shape) for x in varibs)
         # print(f"Found {count} {self._name} parameters.")
+        assert len(loss.shape) == 0, loss.shape
+        tf.debugging.check_numerics(loss, self._name + "_loss")
+        metrics = {}
+        metrics[f"{self._name}_loss"] = loss
+
+        if self._mixed:
+            with tape:
+                loss = self._opt.get_scaled_loss(loss)
         grads = tape.gradient(loss, varibs)
+        if self._mixed:
+            grads = self._opt.get_unscaled_gradients(grads)
         norm = tf.linalg.global_norm(grads)
+        if not self._mixed:
+            tf.debugging.check_numerics(norm, self._name + "_norm")
         if self._clip:
             grads, _ = tf.clip_by_global_norm(grads, self._clip, norm)
 
@@ -289,6 +302,15 @@ class Optimizer(tf.Module):
             self._apply_weight_decay(varibs)
 
         self._opt.apply_gradients(zip(grads, varibs))
+        metrics[f"{self._name}_grad_norm"] = norm
+        if self._mixed:
+            try:
+                metrics[f"{self._name}_loss_scale"] = float(self._opt.loss_scale)
+            except TypeError:
+                metrics[f"{self._name}_loss_scale"] = float(
+                    self._opt.loss_scale._current_loss_scale
+                )
+        return metrics
 
     def _apply_weight_decay(self, varibs):
         """
