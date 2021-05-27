@@ -6,6 +6,7 @@ import cv2
 import pickle
 import utils
 import tools
+from tensorflow.keras.mixed_precision import experimental as prec
 
 
 def count_steps(folder):
@@ -19,6 +20,7 @@ class Play:
         # self.act_space = self.env.action_space
 
         self._c = config
+        self._precision = config.precision
 
         # self.ob, _, _, _ = self.env.step(
         #     self.env._env.action_space.sample()
@@ -216,6 +218,7 @@ class Play:
                 }
                 # print('tuple_of_episode_columns[2]:',np.amax(obs_data["obp1s"]))
                 # print('tuple_of_episode_columns[2]:',np.amin(obs_data["obp1s"]))
+                obs_data = {k: self._convert(v) for k, v in obs_data.items()}
 
                 act, self.model.state = self.model.policy(obs_data, training=True)
 
@@ -311,7 +314,7 @@ class Play:
 
                 # for dreamer, it need to reset state at end of every episode
                 if self.model.state is not None and np.array([done]).any():
-                    mask = tf.cast(1 - np.array([done]), tf.float32)[:, None]
+                    mask = tf.cast(1 - np.array([done]), self._float)[:, None]
                     self.model.state = tf.nest.map_structure(
                         lambda x: x * mask, self.model.state
                     )
@@ -375,9 +378,8 @@ class Play:
                 "dones": tuple_of_episode_columns[4],
                 "discounts": tuple_of_episode_columns[5],
             }
-            # obp1s_array = np.array(tuple_of_episode_columns[2])
-            # print('tuple_of_episode_columns[2]:',np.amax(obp1s_array))
-            # print('tuple_of_episode_columns[2]:',np.amin(obp1s_array))
+            dict_of_episode_record = {k: self._convert(v) for k, v in dict_of_episode_record.items()}
+
 
             # reset the inner buffer
             filename = utils.save_episode(self.datadir, dict_of_episode_record)
@@ -402,6 +404,19 @@ class Play:
             episode_record = []
             self.post_process_play_records()
             print("not enough data!!")
+    
+    def _convert(self, value):
+        value = np.array(value)
+        if np.issubdtype(value.dtype, np.floating):
+            dtype = {16: np.float16, 32: np.float32, 64: np.float64}[self._precision]
+        elif np.issubdtype(value.dtype, np.signedinteger):
+            dtype = {16: np.int16, 32: np.int32, 64: np.int64}[self._precision]
+        elif np.issubdtype(value.dtype, np.uint8):
+            dtype = np.uint8
+        else:
+            raise NotImplementedError(value.dtype)
+        return value.astype(dtype)
+
 
     def post_process_play_records(self):
         self.play_records = []
@@ -480,6 +495,8 @@ class Play:
         # print('tuple_of_episode_columns[2]:',np.amin(data["obp1s"]))
 
         data = utils.preprocess(data, self._c)
+        # print('data["actions"]:',data["actions"])
+ 
 
         obs, actions, obp1s, rewards, dones, discounts = (
             data["obs"],

@@ -9,17 +9,17 @@ import tensorflow as tf
 import os
 import time
 
-# from tensorflow.keras.mixed_precision import experimental as prec
+from tensorflow.keras.mixed_precision import experimental as prec
 
 
-@tf.function
+# @tf.function
 def preprocess(episode_record, config):
     # print("preprocess episode_record:",episode_record.keys())
-    # dtype = prec.global_policy().compute_dtype
+    dtype = prec.global_policy().compute_dtype
+
     episode_record = (
         episode_record.copy()
     )  # when used in policy(), do this to avoid the effect of data to save.
-    dtype = tf.float32
     with tf.device("cpu:0"):
         episode_record["obs"] = tf.cast(episode_record["obs"], dtype) / 255.0 - 0.5
         episode_record["obp1s"] = tf.cast(episode_record["obp1s"], dtype) / 255.0 - 0.5
@@ -31,6 +31,10 @@ def preprocess(episode_record, config):
         # ]  # default none
         # episode_record["rewards"] = clip_rewards(episode_record["rewards"])
         episode_record["discounts"] *= config.discount
+
+    for key, value in episode_record.items():
+        if tf.dtypes.as_dtype(value.dtype) in (tf.float16, tf.float32, tf.float64):
+            episode_record[key] = tf.cast(value, dtype)
     return episode_record
 
 

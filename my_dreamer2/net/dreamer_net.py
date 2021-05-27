@@ -162,7 +162,7 @@ class ConvDecoder(tf.keras.Model):
             self._modules[name] = ctor(*args, **kwargs)
         return self._modules[name]
 
-    def call(self, features):
+    def call(self, features, dtype = None):
         kwargs = dict(strides=2, activation=self._act)
         x = self.get("h1", tf.keras.layers.Dense, 32 * self._depth, None)(features)
         x = tf.reshape(x, [-1, 1, 1, 32 * self._depth])
@@ -183,6 +183,8 @@ class ConvDecoder(tf.keras.Model):
             "h5", tf.keras.layers.Conv2DTranspose, self._shape[-1], 6, strides=2
         )(x)
         mean = tf.reshape(x, tf.concat([tf.shape(features)[:-1], self._shape], 0))
+        if dtype:
+            mean = tf.cast(mean, dtype)
         return tfd.Independent(tfd.Normal(mean, 1), len(self._shape))
 
 
@@ -220,7 +222,7 @@ class ActionDecoder(tf.keras.Model):
             self._modules[name] = ctor(*args, **kwargs)
         return self._modules[name]
 
-    def call(self, features):
+    def call(self, features, dtype = None):
         raw_init_std = np.log(np.exp(self._init_std) - 1)
         x = features
         for index in range(self._layers_num):
@@ -237,7 +239,9 @@ class ActionDecoder(tf.keras.Model):
             dist = tools.SampleDist(dist)
         elif self._dist == "onehot":
             x = self.get(f"hout", tf.keras.layers.Dense, self._size)(x)
-            dist = tools.OneHotDist(x)
+            x = tf.cast(x, tf.float32)
+            dist = tools.OneHotDist(x, dtype = dtype)
+            dist = tools.DtypeDist(dist, dtype)
         else:
             raise NotImplementedError(dist)
         return dist
@@ -261,7 +265,7 @@ class ValueDecoder(tf.keras.Model):
             self._modules[name] = ctor(*args, **kwargs)
         return self._modules[name]
 
-    def call(self, features):
+    def call(self, features, dtype = None):
         x = features
         for index in range(self.layers_num):  # 3
             x = self.get(f"h{index}", tf.keras.layers.Dense, self._units, self._act)(x)
@@ -270,8 +274,12 @@ class ValueDecoder(tf.keras.Model):
         # print("x:",x.shape)
         mean = tf.reshape(mean, tf.concat([tf.shape(features)[:-1], self._shape], 0))
         # print("x:",x.shape)
+        std = 1.0
+
+        if dtype:
+            mean, std = tf.cast(mean, dtype), tf.cast(std, dtype)
         if self._dist == "normal":
-            return tfd.Independent(tfd.Normal(mean, 1.0), len(self._shape))
+            return tfd.Independent(tfd.Normal(mean, std), len(self._shape))
         if self._dist == "binary":
             return tfd.Independent(tfd.Bernoulli(mean), len(self._shape))
         raise NotImplementedError(self._dist)
@@ -284,7 +292,7 @@ class RSSM(tf.keras.Model):
         super(RSSM, self).__init__()
         self._stoch = stoch
         self._activation = act
-        self._stoch_size = stoch
+
         self._deter_size = deter
         self._hidden_size = hidden
         self._discrete = discrete
@@ -304,14 +312,7 @@ class RSSM(tf.keras.Model):
         return self._modules[name]
 
     def initial(self, batch_size):
-        # dtype = tf.float32
-        # return dict(
-        #     mean=tf.zeros([batch_size, self._stoch_size], dtype),
-        #     std=tf.zeros([batch_size, self._stoch_size], dtype),
-        #     stoch=tf.zeros([batch_size, self._stoch_size], dtype),
-        #     deter=self._cell.get_initial_state(None, batch_size, dtype),
-        # )  # zero initialization, float32
-        dtype = tf.float32
+        dtype = prec.global_policy().compute_dtype
         return dict(
             logit_vector=tf.zeros([batch_size, self._stoch, self._discrete], dtype),
             stoch=tf.zeros([batch_size, self._stoch * self._discrete], dtype),
@@ -327,12 +328,17 @@ class RSSM(tf.keras.Model):
         """
         return tf.concat([state["stoch"], state["deter"]], -1)
 
-    def get_dist(self, state):
+    def get_dist(self, state, dtype = None):
         """
         # def get_dist(self, state):
         #     return tfd.MultivariateNormalDiag(state["mean"], state["std"])
         """
-        return tfd.Independent(tools.OneHotDist(state["logit_vector"]), 1)
+        logit = state["logit_vector"]
+        logit = tf.cast(logit, tf.float32)
+        dist = tfd.Independent(tools.OneHotDist(logit), 1)
+        if dtype != tf.float32:
+            dist = tools.DtypeDist(dist, dtype or state["logit_vector"].dtype)
+        return dist
 
     @tf.function
     def img_step(self, prev_state, prev_action):
@@ -421,7 +427,6 @@ class RSSM(tf.keras.Model):
     @tf.function
     def imagine(self, action, state=None):  # been used only for summary
         if state is None:
-            # stoch=tf.zeros([batch_size, self._stoch_size], dtype)
             state = self.initial(tf.shape(action)[0])
 
         prior = world_model_imagine(
@@ -438,12 +443,38 @@ class RSSM(tf.keras.Model):
 
         if state is None:
             state = self.initial(tf.shape(action)[0])
-        # print("observe_embed:",embed.shape) # (batch, length, 1536)
+        # print("observe_embed:",embed) # (batch, length, 1536)
 
         post, prior = world_model_observing(
             self.obs_step, state, action, embed
         )  # each value of dict is (25, batch_length,30)
         return post, prior
+
+    def kl_loss(self, post, prior, forward, balance, free, scale):
+        
+        sg = lambda x: tf.nest.map_structure(tf.stop_gradient, x)
+
+        prior_dist = self.get_dist(prior)
+        stop_prior_dist = self.get_dist(sg(prior))
+
+        post_dist = self.get_dist(post)
+        stop_post_dist = self.get_dist(sg(post))
+
+        # div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
+
+
+        mix = balance if forward else (1 - balance)
+        if balance == 0.5:
+            value = tfd.kl_divergence(post_dist, stop_prior_dist)
+            loss = tf.reduce_mean(tf.maximum(value, free))
+        else:
+            value_lhs = kl_value = tfd.kl_divergence(post_dist, stop_prior_dist)
+            value_rhs = tfd.kl_divergence(stop_post_dist, prior_dist)
+            loss_lhs = tf.maximum(tf.reduce_mean(value_lhs), free)
+            loss_rhs = tf.maximum(tf.reduce_mean(value_rhs), free)
+            loss = mix * loss_lhs + (1 - mix) * loss_rhs
+        loss *= scale
+        return loss, kl_value
 
 
 class Dreamer:
@@ -610,6 +641,8 @@ class Dreamer:
 
     def reset(self):
         # this reset the state saved for RSSM forwarding
+        # mask = tf.cast(1 - reset, self._float)[:, None]
+        # state = tf.nest.map_structure(lambda x: x * mask, self.state)
         self.state = None
 
     def _exploration(self, action, training):
@@ -625,13 +658,13 @@ class Dreamer:
             return tf.clip_by_value(tfd.Normal(action, amount).sample(), -1, 1)
         raise NotImplementedError(self._c.action_noise)
 
-    # @tf.function
+    @tf.function
     def policy(self, obs, training=False):
         # this combine the encoder and actor and get feat to get a totoal agent policy
         if self.state is None:
             obs_len = len(obs["obp1s"])
             latent = self.dynamics.initial(obs_len)
-            action = tf.zeros((obs_len, self._actdim), tf.float32)
+            action = tf.zeros((obs_len, self._actdim), self._float)
         else:
             latent, action = self.state
 
@@ -798,7 +831,7 @@ class Dreamer:
         # type3s = tf.concat(type3_list, 0)  # (horizon, 500)
 
         if self._c.future_entropy and tf.greater(self._c.actor_entropy(), 0):
-            transp_reward_pred += self._config.actor_entropy() * actor_ent
+            transp_reward_pred += self._c.actor_entropy() * actor_ent
 
         if self._c.future_entropy and tf.greater(self._c.actor_state_entropy(), 0):
             transp_reward_pred += self._c.actor_state_entropy() * state_ent
@@ -847,11 +880,11 @@ class Dreamer:
 
         4. in each batch process, after imagine step, do update actor and critic
         """
-        obs = tf.cast(obs, tf.float32)  # after preprocess
-        obp1s = tf.cast(obp1s, tf.float32)  # after preprocess
-        actions = tf.cast(acts, tf.float32)
-        rewards = tf.cast(rewards, tf.float32)
-        record_discounts = tf.cast(record_discounts, tf.float32)
+        obs = obs
+        obp1s = obp1s 
+        actions = acts
+        rewards = rewards
+        record_discounts = record_discounts
 
         with tf.GradientTape() as world_tape:
             kl_balance = tools.schedule(self._c.kl_balance, self._step)
@@ -871,10 +904,10 @@ class Dreamer:
             feat = self.dynamics.get_feat(post)  # feat: (25, batch_length, 230)
             # print("world_model_feat:",feat.shape)
             image_pred = self.decoder(
-                feat
+                feat, tf.float32
             )  # image_pred.sample(): (25, batch_length, 64, 64, 3)
             reward_pred = self.reward_decoder(
-                feat
+                feat, tf.float32
             )  # reward_pred.sample(): (25, batch_length)
 
             likes = {}
@@ -886,42 +919,23 @@ class Dreamer:
             #     "image_pred:", image_pred.batch_shape, image_pred.event_shape
             # )  # (50, 10) (64, 64, 3)
             likes["images_prob"] = -self.eta_x * tf.reduce_mean(
-                image_pred.log_prob(obp1s)
+                image_pred.log_prob(tf.cast(obp1s),tf.float32)
             )
             # print("rewards")
             likes["rewards_prob"] = -self.eta_r * tf.reduce_mean(
-                reward_pred.log_prob(rewards)
+                reward_pred.log_prob(tf.cast(rewards),tf.float32)
             )
             if (
                 self._c.pcont
             ):  # for my aspect, this will make model to learn which step to focus by itself.
-                pcont_pred = self._pcont(feat)
+                pcont_pred = self._pcont(feat, tf.float32)
                 pcont_target = record_discounts  # all 1* discount except the done which will be 0. Explicitly make it to learn what is done state.
                 likes["pcont_prob"] = -self._c.pcont_scale * tf.reduce_mean(
-                    pcont_pred.log_prob(pcont_target)
+                    pcont_pred.log_prob(tf.cast(pcont_target),tf.float32)
                 )  # shape = (50,10)
 
-            sg = lambda x: tf.nest.map_structure(tf.stop_gradient, x)
-
-            prior_dist = self.dynamics.get_dist(prior)
-            stop_prior_dist = self.dynamics.get_dist(sg(prior))
-
-            post_dist = self.dynamics.get_dist(post)
-            stop_post_dist = self.dynamics.get_dist(sg(post))
-
-            # div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
-
-
-            mix = 1 - kl_balance
-
-            value_lhs = kl_value = tfd.kl_divergence(post_dist, stop_prior_dist)
-            value_rhs = tfd.kl_divergence(stop_post_dist, prior_dist)
-            loss_lhs = tf.maximum(tf.reduce_mean(value_lhs), kl_free)
-            loss_rhs = tf.maximum(tf.reduce_mean(value_rhs), kl_free)
-            loss = mix * loss_lhs + (1 - mix) * loss_rhs
-            loss *= kl_scale
-
-            world_loss = loss + sum(likes.values())
+            kl_loss, kl_value = self.dynamics.kl_loss(post, prior, self._c.kl_forward, kl_balance, kl_free, kl_scale)
+            world_loss = kl_loss + sum(likes.values())
 
             """
             the model loss is exactly the VAE loss of world model(which is VAE sample generator)
@@ -950,14 +964,10 @@ class Dreamer:
         with tf.GradientTape() as actor_tape:
 
             drop_last = lambda x: x[:, :-1, :]
-            post = {k: drop_last(v) for k, v in post.items()}
+            drop_last_post = {k: drop_last(v) for k, v in post.items()}
 
-            # print(
-            #     'post["stoch"].shape:', post["stoch"].shape
-            # )  # (batch_size, batch_length-1, 1024)
-            # post:
             imag_feat, imag_state, imag_action = self.imagine_ahead(
-                post
+                drop_last_post
             )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
 
             # print("imag_feat:", imag_feat.shape)  # (1568, 15, 1624)
@@ -965,18 +975,19 @@ class Dreamer:
             after_imag_inp = self.dynamics.get_feat(
                 imag_state
             )  # since the feat s prev feat
-            discount = self._pcont(after_imag_inp).mean()
-            reward = self.reward_decoder(
+            discount_pred = self._pcont(after_imag_inp,tf.float32).mean()
+            reward_pred = self.reward_decoder(
                 after_imag_inp).mode()  # reward_pred.sample(): (25*batch_length,horizon-1)
+            reward_pred = tf.cast(reward_pred,tf.float32)
             
             if self._c.slow_value_target == True:
-                value = self.slow_critic(imag_feat).mode()  # (25*batch_length,horizon)
+                value_pred = self.slow_critic(imag_feat,tf.float32).mode()  # (25*batch_length,horizon)
             else:
-                value = self.critic(imag_feat).mode()  # (25*batch_length,horizon)
+                value_pred = self.critic(imag_feat,tf.float32).mode()  # (25*batch_length,horizon)
                 
             weights = tf.stop_gradient(
                 tf.math.cumprod(
-                    tf.concat([tf.ones_like(discount[:, :1]), discount[:, :-1]], 1), 1
+                    tf.concat([tf.ones_like(discount_pred[:, :1]), discount_pred[:, :-1]], 1), 1
                 )
             )  # not to effect the world model
 
@@ -986,20 +997,21 @@ class Dreamer:
             actor_inp = (
                 tf.stop_gradient(imag_feat) if self._c.behavior_stop_grad else imag_feat
             )
-            policy = self.actor(actor_inp)
+            policy = self.actor(actor_inp, tf.float32)
 
             actor_ent = policy.entropy()  # (2450, 15)
-            state_ent = self.dynamics.get_dist(imag_state).entropy()  # (2450, 15, 32)
+            state_ent = self.dynamics.get_dist(imag_state,tf.float32).entropy()  # (2450, 15, 32)
 
+            imag_action = tf.cast(imag_action, tf.float32)
             imag_action_prob = policy.log_prob(imag_action)
             # print("imag_action_prob:", imag_action_prob) # (2450, 15)
 
             
-            _lambda_returns = self.lambda_returns(reward, value, discount, self._c.discount_lambda, actor_ent, state_ent)
+            _lambda_returns = self.lambda_returns(reward_pred, value_pred, discount_pred, self._c.discount_lambda, actor_ent, state_ent)
 
             value_diff = tf.stop_gradient(
                 tf.transpose(_lambda_returns, [1, 0])
-                - self.critic(imag_feat[:, :-1]).mode()
+                - self.critic(imag_feat[:, :-1],tf.float32).mode()
             )
 
             # print("value_diff:", value_diff)
@@ -1024,7 +1036,7 @@ class Dreamer:
             if not self._c.future_entropy and tf.greater(
                 self._c.actor_state_entropy(), 0
             ):
-                mix_actor_target += self._c.actor_state_entropy() * state_ent[:-1]
+                mix_actor_target += self._c.actor_state_entropy() * state_ent[:,:-1]
 
             actor_loss = -tf.reduce_mean(weights * mix_actor_target)
 
@@ -1102,10 +1114,42 @@ class Dreamer:
                 )
 
                 tf.summary.scalar(
-                    "pcont_prob",
-                    likes["pcont_prob"],
+                    "kl_balance",
+                    kl_balance,
                     step=self._step.numpy() * self._c.action_repeat,
                 )
+                tf.summary.scalar(
+                    "kl_free",
+                    kl_free,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                
+                tf.summary.scalar(
+                    "kl_scale",
+                    kl_scale,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "prior_ent",
+                    tf.reduce_mean(self.dynamics.get_dist(prior).entropy()),
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "post_ent",
+                    tf.reduce_mean(self.dynamics.get_dist(post).entropy()),
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "actor_mix",
+                    actor_mix,
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                tf.summary.scalar(
+                    "kl_value",
+                    tf.reduce_mean(kl_value),
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+                
 
         if self.update_step % 2000 == 0:
             print("do image summaries saving!!")

@@ -167,6 +167,30 @@ class OneHotDist(tfd.OneHotCategorical):
         sample += tf.cast(probs - tf.stop_gradient(probs), self._sample_dtype)
         return sample
 
+class DtypeDist:
+    def __init__(self, dist, dtype=None):
+        self._dist = dist
+        self._dtype = dtype or prec.global_policy().compute_dtype
+
+    @property
+    def name(self):
+        return "DtypeDist"
+
+    def __getattr__(self, name):
+        return getattr(self._dist, name)
+
+    def mean(self):
+        return tf.cast(self._dist.mean(), self._dtype)
+
+    def mode(self):
+        return tf.cast(self._dist.mode(), self._dtype)
+
+    def entropy(self):
+        return tf.cast(self._dist.entropy(), self._dtype)
+
+    def sample(self, *args, **kwargs):
+        return tf.cast(self._dist.sample(*args, **kwargs), self._dtype)
+
 
 def schedule(string, step):
     try:
@@ -247,6 +271,9 @@ class Optimizer(tf.Module):
             "sgd": lambda: tf.optimizers.SGD(lr),
             "momentum": lambda: tf.optimizers.SGD(lr, 0.9),
         }[opt]()
+        self._mixed = prec.global_policy().compute_dtype == tf.float16
+        if self._mixed:
+            self._opt = prec.LossScaleOptimizer(self._opt, "dynamic")
 
     def __call__(self, tape, loss, modules):
         modules = modules if hasattr(modules, "__len__") else (modules,)

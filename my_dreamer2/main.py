@@ -6,6 +6,8 @@ from net.dreamer_net import Dreamer
 import functools
 import pathlib
 import tensorflow as tf
+from tensorflow.keras.mixed_precision import experimental as prec
+
 
 
 class AttrDict(dict):
@@ -29,7 +31,7 @@ def define_config():
     config.precision = 16
     # Environment.
     config.task = "breakout"
-    #   config.task = 'atari_SpaceInvaders'
+    # config.task = 'atari_SpaceInvaders'
     config.size = [64, 64]
     config.is_discrete = True
     config.grayscale = True
@@ -38,7 +40,7 @@ def define_config():
     config.action_repeat = 4
     config.eval_noise = 0.0
     config.time_limit = 108000
-    config.prefill = 500
+    config.prefill = 50000
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
@@ -54,7 +56,7 @@ def define_config():
     config.dense_act = "elu"
     config.cnn_act = "elu"
     config.cnn_depth = 48
-    #   config.pcont = False
+
     config.pcont = True
     config.pcont_scale = 5.0
     config.eta_x = 1
@@ -91,6 +93,7 @@ def define_config():
     config.kl_balance = "0.8"
     config.kl_scale = 0.1
     config.kl_free = 0.0
+    config.kl_forward = False
     # Behavior.
     config.discount = 0.999
     config.imag_gradient = "both"
@@ -123,11 +126,15 @@ if __name__ == "__main__":
     # self._dataset = iter(self.load_dataset(self.datadir, self._c))
     gpus = tf.config.experimental.list_physical_devices("GPU")
 
-    tf.config.experimental.set_visible_devices(gpus[1], "GPU")
+    # tf.config.experimental.set_visible_devices(gpus[1], "GPU")
     if gpus:
         # Currently, memory growth needs to be the same across GPUs
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
+
+    assert config.precision in (16, 32), config.precision
+    if config.precision == 16:
+        prec.set_policy(prec.Policy("mixed_float16"))
 
     mode = "train"
 
