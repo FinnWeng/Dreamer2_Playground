@@ -30,8 +30,7 @@ def define_config():
     config.steps = 5e6
     config.eval_every = 1e4
     config.log_every = 1e3
-    config.log_scalars = True
-    config.log_images = True
+
     config.gpu_growth = True
     config.precision = 16
     # Environment.
@@ -86,15 +85,14 @@ def define_config():
     config.slow_target_fraction = 1
     config.opt = "adam"
 
-    config.pretrain = 100
+    config.pretrain = 0
     config.model_lr = 2e-4
-    config.value_lr = 1e-5
+    config.value_lr = 1e-4
     config.actor_lr = 4e-5
     config.grad_clip = 100.0
     config.actor_grad_clip = 100.0
     config.value_grad_clip = 100.0
     config.opt_eps = 1e-5
-    config.dataset_balance = False
     config.kl_balance = "0.8"
     config.kl_scale = 0.1
     config.kl_free = 0.0
@@ -110,7 +108,7 @@ def define_config():
     config.actor_entropy = "linear(3e-3,3e-4,2.5e6)"
     config.actor_state_entropy = 0.0
 
-    config.action_init_std = 5.0
+    config.action_init_std = 1.0
     #   config.expl = 'additive_gaussian'
     config.expl = "epsilon_greedy"
     config.expl_amount = 0.0

@@ -1071,7 +1071,7 @@ class Dreamer:
         self.update_step += 1
         tf.summary.experimental.set_step(self.update_step)
 
-        if self.update_step % 20 == 0:
+        if self.update_step % self._c.log_every == 0:
             print("update finish, save summary..., now update step:", self.update_step)
             with self._writer.as_default():
                 tf.summary.scalar(
