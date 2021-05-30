@@ -181,20 +181,15 @@ class Play:
         """
         collect end when the play_records full or episode end
         """
-        # trainsaction = {
-        #     "ob": self.ob,
-        #     "obp1": self.ob,
-        #     "action": np.zeros(
-        #         [
-        #             4,
-        #         ]
-        #     ),
-        #     "reward": 0.0,
-        #     "done": 0,
-        #     "discount": np.array(1.0),
-        # }
+        trainsaction = {
+            "ob": self.ob,
+            "obp1": self.ob,
+            "reward": 0.0,
+            "done": 0,
+            "discount": np.array(1.0),
+        }
 
-        episode_record = []
+        episode_record = [trainsaction]
         """
         I call this episode_record since when there's a done for playing, I must end collecting data for 
         capturing the end score of an episode, not to mix with next episode start when doing TD.
@@ -313,6 +308,14 @@ class Play:
 
                 average_reward = self.episode_reward / self.episode_step
 
+                # to make first trasaction with zero action
+                for key, value in episode_record[1].items():
+                    if key not in episode_record[0]:
+                        # print("episode_record[0] doesn't have key ", key)
+                        episode_record[0][key] = 0 * value
+                        # print("Now it is:",episode_record[0][key])
+                
+
                 # for dreamer, it need to reset state at end of every episode
                 if self.model.state is not None and np.array([done]).any():
                     mask = tf.cast(1 - np.array([done]), self._float)[:, None]
@@ -366,6 +369,9 @@ class Play:
                 self.play_records.append(TD_data)
                 # so the structure of self.play_records is:
                 # (batch_size* batch_length*TD_size or greater , TD_size)
+            
+            # print("len(episode_record):",episode_record[-1])
+            # print("len(self.play_records):",self.play_records[-1])
 
             tuple_of_episode_columns = self.TD_dict_to_TD_train_data(
                 self.play_records, True

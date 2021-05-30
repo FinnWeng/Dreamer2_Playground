@@ -87,8 +87,8 @@ def define_config():
 
     config.pretrain = 0
     config.model_lr = 2e-4
-    config.value_lr = 1e-4
     config.actor_lr = 4e-5
+    config.value_lr = 1e-4
     config.grad_clip = 100.0
     config.actor_grad_clip = 100.0
     config.value_grad_clip = 100.0
