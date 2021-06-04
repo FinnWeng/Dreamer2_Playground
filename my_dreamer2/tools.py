@@ -55,9 +55,7 @@ def graph_summary(writer, fn, *args):
 
 
 def video_summary(name, video, step=None, fps=20):
-    # print("name:", name)
-    # name = name if isinstance(name, str) else name.decode("utf-8")
-    name = str(name)
+    name = name if isinstance(name, str) else name.decode("utf-8")
     if np.issubdtype(video.dtype, np.floating):
         video = np.clip(255 * video, 0, 255).astype(np.uint8)
     B, T, H, W, C = video.shape
@@ -66,12 +64,12 @@ def video_summary(name, video, step=None, fps=20):
         summary = tf1.Summary()
         image = tf1.Summary.Image(height=B * H, width=T * W, colorspace=C)
         image.encoded_image_string = encode_gif(frames, fps)
-        summary.value.add(tag=name + "/gif", image=image)
+        summary.value.add(tag=name, image=image)
         tf.summary.experimental.write_raw_pb(summary.SerializeToString(), step)
     except (IOError, OSError) as e:
         print("GIF summaries require ffmpeg in $PATH.", e)
         frames = video.transpose((0, 2, 1, 3, 4)).reshape((1, B * H, T * W, C))
-        tf.summary.image(name + "/grid", frames, step)
+        tf.summary.image(name, frames, step)
 
 
 def encode_gif(frames, fps):
@@ -167,6 +165,7 @@ class OneHotDist(tfd.OneHotCategorical):
         sample += tf.cast(probs - tf.stop_gradient(probs), self._sample_dtype)
         return sample
 
+
 class DtypeDist:
     def __init__(self, dist, dtype=None):
         self._dist = dist
@@ -225,17 +224,24 @@ def count_steps(folder):
 
 
 def static_scan(fn, inputs, start, reverse=False):
+    # print("inputs:", inputs[0].shape)
     last = start
     outputs = [[] for _ in tf.nest.flatten(start)]
+
     indices = range(len(tf.nest.flatten(inputs)[0]))
     if reverse:
         indices = reversed(indices)
     for index in indices:
+
         inp = tf.nest.map_structure(lambda x: x[index], inputs)
+        # inp: action, embd
+
         last = fn(last, inp)
+        # print(last[0]["stoch"])
         [o.append(l) for o, l in zip(outputs, tf.nest.flatten(last))]
     if reverse:
         outputs = [list(reversed(x)) for x in outputs]
+    
     outputs = [tf.stack(x, 0) for x in outputs]
     return tf.nest.pack_sequence_as(start, outputs)
     # inputs = reward + pcont * next_values * (1 - lambda_)

@@ -14,7 +14,6 @@ from tensorflow.keras.mixed_precision import experimental as prec
 # tf.get_logger().setLevel("ERROR")
 
 
-
 class AttrDict(dict):
 
     __setattr__ = dict.__setitem__
@@ -44,7 +43,7 @@ def define_config():
     config.action_repeat = 4
     config.eval_noise = 0.0
     config.time_limit = 108000
-    config.prefill = 50000
+    config.prefill = 500
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
@@ -65,7 +64,6 @@ def define_config():
     config.pcont_scale = 5.0
     config.eta_x = 1
     config.eta_r = 1
-
 
     config.weight_decay = 1e-6
 

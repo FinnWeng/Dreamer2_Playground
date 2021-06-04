@@ -48,17 +48,21 @@ class Gym_Wrapper:
         self.shape = self._env.observation_space.shape[:2] + (
             () if self._grayscale else (3,)
         )
+    
+    def _sample_action(self):
+        actions = self._env.action_space.n
+        index = self._random.randint(0, actions)
+        reference = np.zeros(actions, dtype=np.float32)
+        reference[index] = 1.0
+        return reference
 
     @property
     def action_space(self):
         shape = (self._env.action_space.n,)
         space = gym.spaces.Box(low=0, high=1, shape=shape, dtype=np.float32)
-        self._mask = np.logical_and(np.isfinite(space.low), np.isfinite(space.high))
-        self._low = np.where(self._mask, space.low, -1)
-        self._high = np.where(self._mask, space.high, 1)
-        low = np.where(self._mask, -np.ones_like(self._low), self._low)
-        high = np.where(self._mask, np.ones_like(self._low), self._high)
-        return gym.spaces.Box(low, high, dtype=np.float32)
+        space.sample = self._sample_action
+        space.discrete = True
+        return space
 
     def reset(self):
 

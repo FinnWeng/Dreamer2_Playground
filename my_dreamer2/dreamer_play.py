@@ -30,6 +30,7 @@ class Play:
         print("self.ob:", self.ob.shape)
         acts = self.env.action_space
 
+
         self._c.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
         print("self._c.num_actions:", self._c.num_actions)
         # self.batch_size = 16
@@ -203,6 +204,7 @@ class Play:
 
             if using_random_policy:
                 act = self.model.random_policy().numpy()  # to get batch dim
+                # print("act:",act)
 
             else:
 
@@ -251,6 +253,7 @@ class Play:
 
             self._step.assign_add(1)
 
+
             trainsaction = {
                 "ob": self.ob,
                 "obp1": ob,
@@ -268,7 +271,7 @@ class Play:
                 print("pre-set!")
                 done = True
                 trainsaction["done"] = done
-                trainsaction["discount"] = np.array(1 - float(done))
+                trainsaction["discount"] = np.array(1.0).astype(np.float32)
 
             episode_record.append(trainsaction)
             # print(
@@ -432,12 +435,16 @@ class Play:
         total = 0
         length = len(episode["rewards"]) - 1
         score = float(episode["rewards"].astype(np.float64).sum())
+        video = episode["obp1s"]
+
         for key, ep in reversed(sorted(cache.items(), key=lambda x: x[0])):
 
             if total <= self._c.max_dataset_steps - length:
                 total += len(ep["rewards"]) - 1
             else:
                 del cache[key]
+        
+        cache[str(episode_name)] = episode
 
         with self.model._writer.as_default():
             tf.summary.scalar(
@@ -464,7 +471,12 @@ class Play:
                 step=self._step.numpy() * self._c.action_repeat,
             )  # control by model.total_step, record the env total step
 
-        cache[str(episode_name)] = episode
+            # if self._step.numpy() % 2500 == 0:
+            print("save train_policy!!!!")
+            tools.video_summary("train_policy", np.array(video[None]), self._step.numpy() * self._c.action_repeat)
+
+
+        
         print("the episodes size now is:", total + length, "steps")
 
     # @tf.function
