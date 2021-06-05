@@ -1293,8 +1293,9 @@ class Dreamer:
                         step=self._step.numpy() * self._c.action_repeat,
                     )
 
-        if self.update_step % 2000 == 0:
+        if self.update_step % 2 == 0:
             print("do image summaries saving!!")
+
             self._image_summaries(
                 {"obs": obs, "actions": actions, "obp1s": obp1s},
                 embed,

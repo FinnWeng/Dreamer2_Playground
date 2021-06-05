@@ -55,7 +55,8 @@ def graph_summary(writer, fn, *args):
 
 
 def video_summary(name, video, step=None, fps=20):
-    name = name if isinstance(name, str) else name.decode("utf-8")
+    # name = name if isinstance(name, str) else name.decode("utf-8")
+    name = str(name)
     if np.issubdtype(video.dtype, np.floating):
         video = np.clip(255 * video, 0, 255).astype(np.uint8)
     B, T, H, W, C = video.shape
