@@ -43,7 +43,7 @@ def define_config():
     config.action_repeat = 4
     config.eval_noise = 0.0
     config.time_limit = 108000
-    config.prefill = 500
+    config.prefill = 50000
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.

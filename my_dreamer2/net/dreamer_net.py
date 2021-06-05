@@ -108,7 +108,6 @@ def world_model_observing(fn, state_dict, action_array, embed_array):
         prior_v_tensor = tf.stack(prior_v_list, 1)  # (25, batch_length,30)
         post_output_dict[k] = post_v_tensor
         prior_output_dict[k] = prior_v_tensor
-    print("last current_state['stoch']:", current_state["stoch"])
 
     return post_output_dict, prior_output_dict
 
@@ -453,7 +452,7 @@ class RSSM(tf.keras.Model):
         """
         using obs_step to acturely do observe since it need to do transpose
         """
-        print("now observe")
+        # print("now observe")
 
         if state is None:
             state = self.initial(tf.shape(action)[0])
@@ -706,6 +705,7 @@ class Dreamer:
         else:
             latent, action = self.state
 
+
         embed = self.encoder(utils.preprocess(obs, self._c)["obp1s"])
         latent, _ = self.dynamics.obs_step(
             latent, action, embed
@@ -737,7 +737,7 @@ class Dreamer:
 
         No need to worry feature elsewhere, all of them are after imagine
         """
-        print("now imagine_ahead")
+        # print("now imagine_ahead")
         # each value of start_state(post) dict is (25, batch_length,30)
         state = start_state
         # this is different from function imagine. this use fresh action from policy to get next state, and next state.
@@ -769,8 +769,6 @@ class Dreamer:
         states, imag_feat, imag_action = world_model_imagine_fresh_action(
             img_step_fresh_action, start, control_array
         )  # each is (batch_length*batch_length, horizon, 30)
-
-
 
 
         imag_states = {
@@ -1117,9 +1115,6 @@ class Dreamer:
             # print("value_pred:",value_pred.mean().shape)
 
             target = tf.stop_gradient(tf.transpose(_lambda_returns, [1, 0]))
-
-            print("weights:", weights.shape)
-            print("target:", target.shape)
 
             critic_loss = tf.reduce_mean(
                 weights * -value_pred.log_prob(target)

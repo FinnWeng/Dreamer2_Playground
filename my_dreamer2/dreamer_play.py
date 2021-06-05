@@ -126,7 +126,6 @@ class Play:
         if advantage:
 
             for TD_data in batch_data:
-
                 # TD_size,{4}
                 TD_reward = 0
                 ob = TD_data[0]["ob"]
@@ -135,6 +134,7 @@ class Play:
 
                 for i in range(len(TD_data)):
                     TD_reward += TD_data[i]["reward"]
+
                 done = TD_data[-1]["done"]
                 discount = TD_data[-1]["discount"]
 
@@ -214,6 +214,7 @@ class Play:
                     "rewards": 0.0,
                     "discounts": 1.0,
                 }
+
                 # print('tuple_of_episode_columns[2]:',np.amax(obs_data["obp1s"]))
                 # print('tuple_of_episode_columns[2]:',np.amin(obs_data["obp1s"]))
                 obs_data = {k: self._convert(v) for k, v in obs_data.items()}
@@ -246,6 +247,7 @@ class Play:
             #         cv2.imwrite("./train_gen_img/play_img_{}.jpg".format(i), play_img)
             #     self.RGB_array_list = []
             #     self.save_play_img = False
+
 
             ob, reward, done, info = self.act_repeat(
                 self.env, argmax_act[0]
@@ -326,6 +328,7 @@ class Play:
                         lambda x: x * mask, self.model.state
                     )
                 else:
+
                     self.model.reset()
 
                 # if len(episode_record) < self.TD_size:
@@ -367,18 +370,18 @@ class Play:
                 if (
                     len(TD_data) != self.TD_size
                 ):  # to deal with +1 causing not enough data of a TD size
-                    # print("reverse take for taking just to end of episode")
+                    print("reverse take for taking just to end of episode")
                     TD_data = episode_record[-self.TD_size :]
                 self.play_records.append(TD_data)
                 # so the structure of self.play_records is:
                 # (batch_size* batch_length*TD_size or greater , TD_size)
             
-            # print("len(episode_record):",episode_record[-1])
-            # print("len(self.play_records):",self.play_records[-1])
 
             tuple_of_episode_columns = self.TD_dict_to_TD_train_data(
                 self.play_records, True
             )  # for Dreamer, the TD = 1
+
+
 
             dict_of_episode_record = {
                 "obs": tuple_of_episode_columns[0],
@@ -510,11 +513,8 @@ class Play:
         4. in each batch process, after imagine step, do update actor and critic
         """
         data = next(self._dataset)
-        # print('tuple_of_episode_columns[2]:',np.amax(data["obp1s"]))
-        # print('tuple_of_episode_columns[2]:',np.amin(data["obp1s"]))
 
         data = utils.preprocess(data, self._c)
-        # print('data["actions"]:',data["actions"])
  
 
         obs, actions, obp1s, rewards, dones, discounts = (
@@ -534,7 +534,6 @@ class Play:
         # print("discounts:", discounts.shape)  # (50, 10)
 
         start_time = time.time()
-        rewards_mean = None
         rewards_mean = self.model.update_dreaming(
             obs, actions, obp1s, rewards, dones, discounts
         )
@@ -543,8 +542,6 @@ class Play:
 
         end_time = time.time()
         # print("update time = ", end_time - start_time)
-
-        self.post_process_play_records()
         return rewards_mean
 
     def reset_total_step(self):
