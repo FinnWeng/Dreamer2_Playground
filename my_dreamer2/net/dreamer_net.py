@@ -954,10 +954,10 @@ class Dreamer:
             #     "image_pred:", image_pred.batch_shape, image_pred.event_shape
             # )  # (50, 10) (64, 64, 3)
             likes["images_prob"] = image_pred.log_prob(tf.cast(obp1s, tf.float32))
-            losses["images_prob"] = -self.eta_x * tf.reduce_mean(likes["images_prob"])
+            losses["images_loss"] = -self.eta_x * tf.reduce_mean(likes["images_prob"])
             # print("rewards")
             likes["rewards_prob"] = reward_pred.log_prob(tf.cast(rewards, tf.float32))
-            losses["rewards_prob"] = -self.eta_r * tf.reduce_mean(likes["rewards_prob"])
+            losses["rewards_loss"] = -self.eta_r * tf.reduce_mean(likes["rewards_prob"])
             if (
                 self._c.pcont
             ):  # for my aspect, this will make model to learn which step to focus by itself.
@@ -966,7 +966,7 @@ class Dreamer:
                 likes["pcont_prob"] = pcont_pred.log_prob(
                     tf.cast(pcont_target, tf.float32)
                 )
-                losses["pcont_prob"] = -self._c.pcont_scale * tf.reduce_mean(
+                losses["pcont_loss"] = -self._c.pcont_scale * tf.reduce_mean(
                     likes["pcont_prob"]
                 )  # shape = (50,10)
 
@@ -1169,14 +1169,20 @@ class Dreamer:
                 )
 
                 tf.summary.scalar(
-                    "images_prob",
-                    likes["images_prob"],
+                    "images_loss",
+                    losses["images_loss"],
                     step=self._step.numpy() * self._c.action_repeat,
                 )
 
                 tf.summary.scalar(
-                    "rewards_prob",
-                    likes["rewards_prob"],
+                    "rewards_loss",
+                    losses["rewards_loss"],
+                    step=self._step.numpy() * self._c.action_repeat,
+                )
+
+                tf.summary.scalar(
+                    "discount_loss",
+                    losses["pcont_loss"],
                     step=self._step.numpy() * self._c.action_repeat,
                 )
 
