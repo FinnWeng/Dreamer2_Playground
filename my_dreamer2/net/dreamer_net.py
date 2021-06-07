@@ -344,7 +344,7 @@ class RSSM(tf.keras.Model):
             dist = tools.DtypeDist(dist, dtype or state["logit_vector"].dtype)
         return dist
 
-    # @tf.function
+    @tf.function
     def img_step(self, prev_state, prev_action):
         """
         the basic step, run without obs. the one with obs bases on this function
@@ -379,7 +379,7 @@ class RSSM(tf.keras.Model):
         logit_vector = tf.reshape(
             x, x.shape[:-1] + [self._stoch, self._discrete]
         )  # # =>(25, 32,  _stoch_size)
-        
+
         """
         Straight-Through Gradients trick is built-in in get_dist 
         """
@@ -400,7 +400,7 @@ class RSSM(tf.keras.Model):
         prior = {"logit_vector": logit_vector, "stoch": stoch, "deter": deter}
         return prior
 
-    # @tf.function
+    @tf.function
     def obs_step(self, prev_state, prev_action, embed):
         """
         p(st|st-1,at-1,ot)
@@ -436,7 +436,7 @@ class RSSM(tf.keras.Model):
         post = {"logit_vector": logit_vector, "stoch": stoch, "deter": prior["deter"]}
         return post, prior
 
-    # @tf.function
+    @tf.function
     def imagine(self, action, state=None):  # been used only for summary
         if state is None:
             state = self.initial(tf.shape(action)[0])
@@ -447,7 +447,7 @@ class RSSM(tf.keras.Model):
 
         return prior
 
-    # @tf.function
+    @tf.function
     def observe(self, embed, action, state=None):
         """
         using obs_step to acturely do observe since it need to do transpose
