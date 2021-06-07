@@ -7,6 +7,7 @@ import pickle
 import utils
 import tools
 from tensorflow.keras.mixed_precision import experimental as prec
+import copy
 
 
 def count_steps(folder):
@@ -183,8 +184,8 @@ class Play:
         collect end when the play_records full or episode end
         """
         trainsaction = {
-            "ob": self.ob,
-            "obp1": self.ob,
+            "ob": copy.deepcopy(self.ob),
+            "obp1": copy.deepcopy(self.ob),
             "reward": 0.0,
             "done": 0,
             "discount": np.array(1.0),
@@ -248,25 +249,22 @@ class Play:
             #     self.RGB_array_list = []
             #     self.save_play_img = False
 
-
             ob, reward, done, info = self.act_repeat(
                 self.env, argmax_act[0]
             )  # no repear any more
 
             self._step.assign_add(1)
 
-
             trainsaction = {
-                "ob": self.ob,
-                "obp1": ob,
-                "action": act[0],
-                "reward": reward,
-                "done": done,
+                "ob": copy.deepcopy(self.ob),
+                "obp1": copy.deepcopy(ob),
+                "action": copy.deepcopy(act[0]),
+                "reward": copy.deepcopy(reward),
+                "done": copy.deepcopy(done),
                 "discount": np.array(
                     1 - float(done)
                 ),  # it means when done, discount = 1, else 0.
             }  # ob+1(obp1) for advantage method
-
             # if self.episode_step < 50000:
 
             if self.episode_step >= self._c.time_limit:
@@ -474,9 +472,9 @@ class Play:
                 step=self._step.numpy() * self._c.action_repeat,
             )  # control by model.total_step, record the env total step
 
-            # if self._step.numpy() % 2500 == 0:
-            print("save train_policy!!!!")
-            tools.video_summary("train_policy", np.array(video[None]), self._step.numpy() * self._c.action_repeat)
+            if self._step.numpy() % 2500 == 2499:
+                print("save train_policy!!!!")
+                tools.video_summary("train_policy", np.array(video[None]), self._step.numpy() * self._c.action_repeat)
 
 
         
@@ -515,7 +513,6 @@ class Play:
         data = next(self._dataset)
 
         data = utils.preprocess(data, self._c)
- 
 
         obs, actions, obp1s, rewards, dones, discounts = (
             data["obs"],

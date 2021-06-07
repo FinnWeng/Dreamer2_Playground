@@ -43,7 +43,7 @@ def define_config():
     config.action_repeat = 4
     config.eval_noise = 0.0
     config.time_limit = 108000
-    config.prefill = 50
+    config.prefill = 50000
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
@@ -107,7 +107,6 @@ def define_config():
     config.actor_state_entropy = 0.0
 
     config.action_init_std = 1.0
-    #   config.expl = 'additive_gaussian'
     config.expl = "epsilon_greedy"
     config.expl_amount = 0.0
     config.behavior_stop_grad = True

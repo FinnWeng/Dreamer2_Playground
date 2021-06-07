@@ -377,9 +377,9 @@ class RSSM(tf.keras.Model):
             x
         )  # =>(25, 32* _stoch_size)
         logit_vector = tf.reshape(
-            x, [-1, self._stoch, self._discrete]
+            x, x.shape[:-1] + [self._stoch, self._discrete]
         )  # # =>(25, 32,  _stoch_size)
-
+        
         """
         Straight-Through Gradients trick is built-in in get_dist 
         """
@@ -1293,7 +1293,7 @@ class Dreamer:
                         step=self._step.numpy() * self._c.action_repeat,
                     )
 
-        if self.update_step % 2 == 0:
+        if self.update_step % 2000 == 0:
             print("do image summaries saving!!")
 
             self._image_summaries(
