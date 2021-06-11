@@ -28,9 +28,8 @@ class Play:
         #     self.env._env.action_space.sample()
         # )  # whether it is discrete or not, 0 is proper
         self.ob = self.env.reset()
-        print("self.ob:", self.ob.shape)
         acts = self.env.action_space
-
+        self.random_actor = tools.OneHotDist(tf.zeros_like(acts.low)[None])
 
         self._c.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
         print("self._c.num_actions:", self._c.num_actions)
@@ -41,7 +40,7 @@ class Play:
         )  # when it is not model-based learning, consider it controling the replay buffer
         self.TD_size = 1  # no TD
         self.play_records = []
-        self.act_repeat_time = self._c.action_repeat
+
         self.advantage = True
 
         self.total_step = 1
@@ -50,6 +49,15 @@ class Play:
         self.episode_reward = 0
         self.episode_step = 1  # to avoid devide by zero
         self.datadir = self._c.logdir / "episodes"
+
+        self._writer = tf.summary.create_file_writer(
+            "./tf_log", max_queue=1000, flush_millis=20000
+        )
+
+        if training:
+            self.prefill_and_make_dataset()
+        else:
+            pass
 
         with tf.device("cpu:1"):
             self._step = tf.Variable(count_steps(self.datadir), dtype=tf.int64)
@@ -63,19 +71,13 @@ class Play:
         self._c.imag_gradient_mix = lambda x=self._c.imag_gradient_mix: tools.schedule(
             x, self._step
         )
-        self.model = model_maker(self.env, training, self._step, self._c)
+        self.model = model_maker(self.env, training, self._step, self._writer, self._c)
+    
+    def random_policy(self):
+        action = self.random_actor.sample()
+        return action
 
-        if training:
-            self.prefill_and_make_dataset()
-        else:
-            # self.episodes = utils.load_episodes(self.datadir, limit=self._c.max_dataset_steps)
-            # self._dataset = iter(utils.load_dataset(self.episodes, self._c))
-            pass
 
-    # def prefill_and_make_dataset(self):
-    #     # since it casuse error when random choice zero object in self.load_dataset
-    #     self.collect(using_random_policy=False, must_be_whole_episode=True)
-    #     self._dataset = iter(utils.load_dataset(self.datadir, self._c))
 
     def prefill_and_make_dataset(self):
         # since it casuse error when random choice zero object in self.load_dataset
@@ -84,7 +86,7 @@ class Play:
         )
         while True:
             self.collect(
-                using_random_policy=True, must_be_whole_episode=True, prefill=True
+                must_be_whole_episode=True, prefill=True
             )
             if self.total_step >= self._c.prefill:
                 self.reset_total_step()
@@ -178,7 +180,7 @@ class Play:
             return np.array(obs), np.array(rewards), np.array(dones)
 
     def collect(
-        self, using_random_policy=False, must_be_whole_episode=True, prefill=False
+        self, must_be_whole_episode=True, prefill=False
     ):
         """
         collect end when the play_records full or episode end
@@ -203,8 +205,8 @@ class Play:
             # episode = []
             # while True:
 
-            if using_random_policy:
-                act = self.model.random_policy().numpy()  # to get batch dim
+            if prefill:
+                act = self.random_policy().numpy()  # to get batch dim
                 # print("act:",act)
 
             else:
@@ -253,7 +255,8 @@ class Play:
                 self.env, argmax_act[0]
             )  # no repear any more
 
-            self._step.assign_add(1)
+            if not prefill:
+                self._step.assign_add(1)
 
             trainsaction = {
                 "ob": copy.deepcopy(self.ob),
@@ -294,7 +297,7 @@ class Play:
                 # self.total_step = 1
 
             else:
-                if self.episode_step % self._c.train_every == 0:
+                if self._step.numpy() % self._c.train_every == 0:
                     self.dreaming_update()
                     print("update complete!")
                 else:
@@ -318,44 +321,17 @@ class Play:
                         episode_record[0][key] = 0 * value
                         # print("Now it is:",episode_record[0][key])
                 
+                if not prefill:
+                    # for dreamer, it need to reset state at end of every episode
+                    if self.model.state is not None and np.array([done]).any():
+                        mask = tf.cast(1 - np.array([done]), self._float)[:, None]
+                        self.model.state = tf.nest.map_structure(
+                            lambda x: x * mask, self.model.state
+                        )
+                    else:
+                        self.model.reset()
 
-                # for dreamer, it need to reset state at end of every episode
-                if self.model.state is not None and np.array([done]).any():
-                    mask = tf.cast(1 - np.array([done]), self._float)[:, None]
-                    self.model.state = tf.nest.map_structure(
-                        lambda x: x * mask, self.model.state
-                    )
-                else:
-
-                    self.model.reset()
-
-                # if len(episode_record) < self.TD_size:
-                if len(episode_record) < self.batch_length * self.TD_size:
-                    print(
-                        len(episode_record),
-                        " is shorter than a minimum episode length",
-                        self.batch_size * self.batch_length * self.TD_size,
-                        ", abort this episode",
-                    )
-                    # trainsaction = {
-                    #     "ob": self.ob,
-                    #     "obp1": self.ob,
-                    #     "action": np.zeros(
-                    #         [
-                    #             4,
-                    #         ]
-                    #     ),
-                    #     "reward": 0.0,
-                    #     "done": 0,
-                    #     "discount": np.array(1.0),
-                    # }  # ob+1(obp1) for advantage method
-                    episode_record = []
-                    if not must_be_whole_episode:
-                        break
-                else:
-                    # done, break the loop for training
-                    print("enough data!!")
-                    break
+                break
 
         """
         move "TD_dict_to_TD_train_data" before update
@@ -395,17 +371,6 @@ class Play:
             # reset the inner buffer
             filename = utils.save_episode(self.datadir, dict_of_episode_record)
             # if self.model.total_step % 100:
-            with self.model._writer.as_default():
-                tf.summary.scalar(
-                    "episode_reward",
-                    tf.reduce_sum(tuple_of_episode_columns[3]),
-                    step=self._step.numpy() * self._c.action_repeat,
-                )  # control by model.total_step, record the env total step
-                tf.summary.scalar(
-                    "length",
-                    len(tuple_of_episode_columns[3]) - 1,
-                    step=self._step.numpy() * self._c.action_repeat,
-                )  # control by model.total_step, record the env total step
 
             self.post_process_episodes(self.episodes, filename, dict_of_episode_record)
 
@@ -447,34 +412,35 @@ class Play:
         
         cache[str(episode_name)] = episode
 
-        with self.model._writer.as_default():
+        step = count_steps(self.datadir)
+
+        with self._writer.as_default():
             tf.summary.scalar(
                 "dataset_size",
                 total + length,
-                step=self._step.numpy() * self._c.action_repeat,
+                step=step * self._c.action_repeat,
             )  # control by model.total_step, record the env total step
 
             tf.summary.scalar(
                 "train_episodes",
                 len(cache),
-                step=self._step.numpy() * self._c.action_repeat,
+                step=step * self._c.action_repeat,
             )  # control by model.total_step, record the env total step
 
             tf.summary.scalar(
                 "train_return",
                 score,
-                step=self._step.numpy() * self._c.action_repeat,
+                step=step * self._c.action_repeat,
             )  # control by model.total_step, record the env total step
 
             tf.summary.scalar(
                 "train_length",
                 length,
-                step=self._step.numpy() * self._c.action_repeat,
+                step=step * self._c.action_repeat,
             )  # control by model.total_step, record the env total step
 
-            if self._step.numpy() % 2500 == 2499:
-                print("save train_policy!!!!")
-                tools.video_summary("train_policy", np.array(video[None]), self._step.numpy() * self._c.action_repeat)
+            print("save train_policy!!!!")
+            tools.video_summary("train_policy", np.array(video[None]), step * self._c.action_repeat)
 
 
         

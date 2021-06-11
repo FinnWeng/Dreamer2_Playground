@@ -23,7 +23,6 @@ class AttrDict(dict):
 def define_config():
     config = AttrDict()
     # General.
-    #   config.logdir = pathlib.Path('.')
     config.logdir = pathlib.Path("./episode_log")
     config.seed = 0
     config.steps = 5e6
@@ -41,16 +40,12 @@ def define_config():
     config.envs = 1
     config.parallel = "none"
     config.action_repeat = 4
-    config.eval_noise = 0.0
     config.time_limit = 108000
-    config.prefill = 50000
+    config.prefill = 5000
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
     config.dyn_cell = "gru_layer_norm"
-    # config.dyn_cell = "gru"
-    # config.deter_size = 800
-    # config.stoch_size = 32
     config.units = 400
     config.dyn_stoch = 32
     config.dyn_deter = 600
@@ -59,6 +54,8 @@ def define_config():
     config.dense_act = "elu"
     config.cnn_act = "elu"
     config.cnn_depth = 48
+    config.encoder_kernels = [4, 4, 4, 4]
+    config.decoder_kernels = [5, 5, 6, 6]
 
     config.pcont = True
     config.pcont_scale = 5.0
@@ -74,7 +71,6 @@ def define_config():
     # config.batch_length = 10
     config.train_every = 16
 
-    # config.max_dataset_steps = 7 * 1e5
     config.max_dataset_steps = 2e6
     config.oversample_ends = True
     config.slow_value_target = True
@@ -157,7 +153,7 @@ if __name__ == "__main__":
         """
         print("play_process.play_records:", len(play_process.play_records))
         play_process.collect(
-            using_random_policy=False, must_be_whole_episode=False, prefill=False
+            must_be_whole_episode=False, prefill=False
         )
         print("play_process.play_records:", len(play_process.play_records))
         # mean_reward = play_process.dreaming_update()

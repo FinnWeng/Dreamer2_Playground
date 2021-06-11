@@ -1,8 +1,6 @@
 import tensorflow as tf
 import tools
 import numpy as np
-import cv2
-import net.layers as layers
 from tensorflow_probability import distributions as tfd
 from tensorflow.keras.mixed_precision import experimental as prec
 import collections
@@ -360,10 +358,7 @@ class RSSM(tf.keras.Model):
         )(x)
         deter = prev_state["deter"]
 
-        x, deter = self._cell(
-            x, [deter]
-        )  # (output, next_state) = call(input, state)
-
+        x, deter = self._cell(x, [deter])  # (output, next_state) = call(input, state)
 
         # x: (25, 200)
         deter = deter[0]  # Keras wraps the state in a list.
@@ -470,15 +465,13 @@ class RSSM(tf.keras.Model):
         # )
         # print("origin_post:",origin_post["stoch"].shape)
 
-
         # dict_swap = lambda x: tf.nest.map_structure(swap, x)
         # origin_post = dict_swap(origin_post)
-
 
         post, prior = world_model_observing(
             self.obs_step, state, action, embed
         )  # each value of dict is (25, batch_length,30)
-        
+
         # print("post:",post["stoch"].shape)
 
         # print(
@@ -515,7 +508,7 @@ class RSSM(tf.keras.Model):
 
 
 class Dreamer:
-    def __init__(self, env, is_training, step, config):
+    def __init__(self, env, is_training, step, writer, config):
 
         # define callback and set networ parameters
 
@@ -593,7 +586,6 @@ class Dreamer:
         )  # tf.Tensor([0. 0. 0. 0.], shape=(4,), dtype=float32)
         self.random_actor = tools.OneHotDist(tf.zeros_like(actspace.low)[None])
 
-        model_modules = [self.encoder, self.dynamics, self.decoder, self.reward_decoder]
         self.state = None
 
         self.world_optimizer = tools.Optimizer(
@@ -621,9 +613,7 @@ class Dreamer:
             opt=self._c.opt,
         )
 
-        self._writer = tf.summary.create_file_writer(
-            "./tf_log", max_queue=1000, flush_millis=20000
-        )
+        self._writer = writer
         self._step = step
         self.update_step = 1
         # self.update_step = int(15.66*1000)
@@ -705,7 +695,6 @@ class Dreamer:
         else:
             latent, action = self.state
 
-
         embed = self.encoder(utils.preprocess(obs, self._c)["obp1s"])
         latent, _ = self.dynamics.obs_step(
             latent, action, embed
@@ -765,11 +754,9 @@ class Dreamer:
         # feat = 0 * dynamics.get_feat(start_state)
         # control_array = self.actor(feat).mode()
 
-
         states, imag_feat, imag_action = world_model_imagine_fresh_action(
             img_step_fresh_action, start, control_array
         )  # each is (batch_length*batch_length, horizon, 30)
-
 
         imag_states = {
             k: tf.concat([tf.expand_dims(start[k], 1), v[:, :-1]], 1)
@@ -888,6 +875,111 @@ class Dreamer:
 
         return offical_LamR_result
 
+    def compute_actor_target(self, post):
+        drop_last = lambda x: x[:, :-1, ...]
+        drop_last_post = {k: drop_last(v) for k, v in post.items()}
+
+        imag_feat, imag_state, imag_action = self.imagine_ahead(
+            drop_last_post
+        )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
+
+        # print("imag_feat:", imag_feat.shape)  # (2450, 15, 1624)
+
+        after_imag_inp = self.dynamics.get_feat(
+            imag_state
+        )  # since the feat s prev feat
+        discount_pred = self._pcont(after_imag_inp, tf.float32).mean()
+        reward_pred = self.reward_decoder(
+            after_imag_inp
+        ).mode()  # reward_pred.sample(): (25*batch_length,horizon-1)
+        reward_pred = tf.cast(reward_pred, tf.float32)
+
+        if self._c.slow_actor_target == True:
+            value_pred = self.slow_critic(
+                imag_feat, tf.float32
+            ).mode()  # (25*batch_length,horizon)
+        else:
+            value_pred = self.critic(
+                imag_feat, tf.float32
+            ).mode()  # (25*batch_length,horizon)
+
+        weights = tf.stop_gradient(
+            tf.math.cumprod(
+                tf.concat(
+                    [tf.ones_like(discount_pred[:, :1]), discount_pred[:, :-1]], 1
+                ),
+                1,
+            )
+        )  # not to effect the world model
+
+        weights = weights[:, :-1]
+        # print("weights:",weights.shape) # (2450, 14)
+
+        actor_ent = self.actor(imag_feat, tf.float32).entropy()  # (2450, 15)
+        state_ent = self.dynamics.get_dist(
+            imag_state, tf.float32
+        ).entropy()  # (2450, 15, 32)
+
+        _lambda_returns = self.lambda_returns(
+            reward_pred,
+            value_pred,
+            discount_pred,
+            self._c.discount_lambda,
+            actor_ent,
+            state_ent,
+        )
+
+        return weights, _lambda_returns, imag_feat, imag_state, imag_action, actor_ent
+
+    def compute_actor_loss(
+        self, weights, lambda_returns, imag_feat, imag_state, imag_action
+    ):
+        actor_inp = (
+            tf.stop_gradient(imag_feat) if self._c.behavior_stop_grad else imag_feat
+        )
+        policy = self.actor(
+            actor_inp, tf.float32
+        )  # IMPORTANT! This policy is not the same with policy in function compute target(input is different)
+        actor_ent = policy.entropy()  # (2450, 15)
+        state_ent = self.dynamics.get_dist(
+            imag_state, tf.float32
+        ).entropy()  # (2450, 15, 32)
+
+        value_diff = tf.stop_gradient(
+            tf.transpose(lambda_returns, [1, 0])
+            - self.critic(imag_feat[:, :-1], tf.float32).mode()
+        )
+
+        # print("value_diff:", value_diff)
+
+        imag_action = tf.cast(imag_action, tf.float32)
+        imag_action_prob = policy.log_prob(imag_action)
+        # print("imag_action_prob:", imag_action_prob) # (2450, 15)
+
+        actor_target = imag_action_prob[:, :-1] * value_diff
+
+        # print("lambda_returns: ", lambda_returns.shape)  # (14, 2450)
+        # print("actor_target:", actor_target.shape)  # (2450, 14)
+        # print("discount:",discount.shape) # (2450, 14)
+
+        actor_mix = self._c.imag_gradient_mix()
+
+        mix_actor_target = (
+            tf.transpose(lambda_returns, [1, 0]) * actor_mix
+            + (1 - actor_mix) * actor_target
+        )
+        # print("mix_actor_target:", mix_actor_target)  # (2450, 14)
+
+        if not self._c.future_entropy and tf.greater(self._c.actor_entropy(), 0):
+            mix_actor_target += self._c.actor_entropy() * actor_ent[:, :-1]
+            
+        if not self._c.future_entropy and tf.greater(self._c.actor_state_entropy(), 0):
+            mix_actor_target += self._c.actor_state_entropy() * state_ent[:, :-1]
+
+        actor_loss = -tf.reduce_mean(weights * mix_actor_target)
+
+        return actor_loss, actor_mix
+
     def update_dreaming(self, obs, acts, obp1s, rewards, dones, record_discounts):
         """
         when geting enough data
@@ -935,6 +1027,10 @@ class Dreamer:
                 embed, actions
             )  # world model try to dream from first step to last step. each value of post dict is (25, batch_length,30)
 
+            kl_loss, kl_value = self.dynamics.kl_loss(
+                post, prior, self._c.kl_forward, kl_balance, kl_free, kl_scale
+            )
+
             feat = self.dynamics.get_feat(post)  # feat: (25, batch_length, 230)
             # print("world_model_feat:",feat.shape)
             image_pred = self.decoder(
@@ -970,9 +1066,6 @@ class Dreamer:
                     likes["pcont_prob"]
                 )  # shape = (50,10)
 
-            kl_loss, kl_value = self.dynamics.kl_loss(
-                post, prior, self._c.kl_forward, kl_balance, kl_free, kl_scale
-            )
             world_loss = kl_loss + sum(losses.values())
 
             """
@@ -1003,106 +1096,121 @@ class Dreamer:
 
         with tf.GradientTape() as actor_tape:
 
-            drop_last = lambda x: x[:, :-1, :]
-            drop_last_post = {k: drop_last(v) for k, v in post.items()}
+            # drop_last = lambda x: x[:, :-1, ...]
+            # drop_last_post = {k: drop_last(v) for k, v in post.items()}
+            # print('drop_last_post["stoch"]:',drop_last_post["stoch"].shape)
 
-            imag_feat, imag_state, imag_action = self.imagine_ahead(
-                drop_last_post
-            )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
+            # imag_feat, imag_state, imag_action = self.imagine_ahead(
+            #     drop_last_post
+            # )  # scaning to get prior for each prev state, step(policy&world model) for horizon(15) steps.
 
-            # print("imag_feat:", imag_feat.shape)  # (2450, 15, 1624)
+            # # print("imag_feat:", imag_feat.shape)  # (2450, 15, 1624)
 
-            after_imag_inp = self.dynamics.get_feat(
-                imag_state
-            )  # since the feat s prev feat
-            discount_pred = self._pcont(after_imag_inp, tf.float32).mean()
-            reward_pred = self.reward_decoder(
-                after_imag_inp
-            ).mode()  # reward_pred.sample(): (25*batch_length,horizon-1)
-            reward_pred = tf.cast(reward_pred, tf.float32)
+            # after_imag_inp = self.dynamics.get_feat(
+            #     imag_state
+            # )  # since the feat s prev feat
+            # discount_pred = self._pcont(after_imag_inp, tf.float32).mean()
+            # reward_pred = self.reward_decoder(
+            #     after_imag_inp
+            # ).mode()  # reward_pred.sample(): (25*batch_length,horizon-1)
+            # reward_pred = tf.cast(reward_pred, tf.float32)
 
-            if self._c.slow_value_target == True:
-                value_pred = self.slow_critic(
-                    imag_feat, tf.float32
-                ).mode()  # (25*batch_length,horizon)
-            else:
-                value_pred = self.critic(
-                    imag_feat, tf.float32
-                ).mode()  # (25*batch_length,horizon)
+            # if self._c.slow_actor_target == True:
+            #     value_pred = self.slow_critic(
+            #         imag_feat, tf.float32
+            #     ).mode()  # (25*batch_length,horizon)
+            # else:
+            #     value_pred = self.critic(
+            #         imag_feat, tf.float32
+            #     ).mode()  # (25*batch_length,horizon)
 
-            weights = tf.stop_gradient(
-                tf.math.cumprod(
-                    tf.concat(
-                        [tf.ones_like(discount_pred[:, :1]), discount_pred[:, :-1]], 1
-                    ),
-                    1,
-                )
-            )  # not to effect the world model
+            # weights = tf.stop_gradient(
+            #     tf.math.cumprod(
+            #         tf.concat(
+            #             [tf.ones_like(discount_pred[:, :1]), discount_pred[:, :-1]], 1
+            #         ),
+            #         1,
+            #     )
+            # )  # not to effect the world model
 
-            weights = weights[:, :-1]
-            # print("weights:",weights.shape) # (2450, 14)
+            # weights = weights[:, :-1]
+            # # print("weights:",weights.shape) # (2450, 14)
 
-            policy = self.actor(imag_feat, tf.float32)
-            actor_ent = policy.entropy()  # (2450, 15)
-            state_ent = self.dynamics.get_dist(
-                imag_state, tf.float32
-            ).entropy()  # (2450, 15, 32)
+            # policy = self.actor(imag_feat, tf.float32)
+            # actor_ent = policy.entropy()  # (2450, 15)
+            # state_ent = self.dynamics.get_dist(
+            #     imag_state, tf.float32
+            # ).entropy()  # (2450, 15, 32)
 
-            _lambda_returns = self.lambda_returns(
-                reward_pred,
-                value_pred,
-                discount_pred,
-                self._c.discount_lambda,
+            # _lambda_returns = self.lambda_returns(
+            #     reward_pred,
+            #     value_pred,
+            #     discount_pred,
+            #     self._c.discount_lambda,
+            #     actor_ent,
+            #     state_ent,
+            # )
+
+            (
+                weights,
+                lambda_returns,
+                imag_feat,
+                imag_state,
+                imag_action,
                 actor_ent,
-                state_ent,
-            )
+            ) = self.compute_actor_target(
+                post
+            )  # post is the start condition of imagine ahead
 
             """
             compute actor loss
             """
 
-            actor_inp = (
-                tf.stop_gradient(imag_feat) if self._c.behavior_stop_grad else imag_feat
+            # actor_inp = (
+            #     tf.stop_gradient(imag_feat) if self._c.behavior_stop_grad else imag_feat
+            # )
+            # actor_ent = self.actor(actor_inp, tf.float32).entropy()  # (2450, 15)
+            # state_ent = self.dynamics.get_dist(
+            #     imag_state, tf.float32
+            # ).entropy()  # (2450, 15, 32)
+
+            # value_diff = tf.stop_gradient(
+            #     tf.transpose(_lambda_returns, [1, 0])
+            #     - self.critic(imag_feat[:, :-1], tf.float32).mode()
+            # )
+
+            # # print("value_diff:", value_diff)
+
+            # imag_action = tf.cast(imag_action, tf.float32)
+            # imag_action_prob = policy.log_prob(imag_action)
+            # # print("imag_action_prob:", imag_action_prob) # (2450, 15)
+
+            # actor_target = imag_action_prob[:, :-1] * value_diff
+
+            # # print("lambda_returns: ", lambda_returns.shape)  # (14, 2450)
+            # # print("actor_target:", actor_target.shape)  # (2450, 14)
+            # # print("discount:",discount.shape) # (2450, 14)
+
+            # actor_mix = self._c.imag_gradient_mix()
+
+            # mix_actor_target = (
+            #     tf.transpose(_lambda_returns, [1, 0]) * actor_mix
+            #     + (1 - actor_mix) * actor_target
+            # )
+            # # print("mix_actor_target:", mix_actor_target)  # (2450, 14)
+
+            # if not self._c.future_entropy and tf.greater(self._c.actor_entropy(), 0):
+            #     mix_actor_target += self._c.actor_entropy() * actor_ent[:, :-1]
+
+            # if not self._c.future_entropy and tf.greater(
+            #     self._c.actor_state_entropy(), 0
+            # ):
+            #     mix_actor_target += self._c.actor_state_entropy() * state_ent[:, :-1]
+
+            # actor_loss = -tf.reduce_mean(weights * mix_actor_target)
+            actor_loss, actor_mix = self.compute_actor_loss(
+                weights, lambda_returns, imag_feat, imag_state, imag_action
             )
-            actor_ent = self.actor(actor_inp, tf.float32).entropy()  # (2450, 15)
-            state_ent = self.dynamics.get_dist(
-                imag_state, tf.float32
-            ).entropy()  # (2450, 15, 32)
-
-            value_diff = tf.stop_gradient(
-                tf.transpose(_lambda_returns, [1, 0])
-                - self.critic(imag_feat[:, :-1], tf.float32).mode()
-            )
-
-            # print("value_diff:", value_diff)
-
-            imag_action = tf.cast(imag_action, tf.float32)
-            imag_action_prob = policy.log_prob(imag_action)
-            # print("imag_action_prob:", imag_action_prob) # (2450, 15)
-
-            actor_target = imag_action_prob[:, :-1] * value_diff
-
-            # print("lambda_returns: ", lambda_returns.shape)  # (14, 2450)
-            # print("actor_target:", actor_target.shape)  # (2450, 14)
-            # print("discount:",discount.shape) # (2450, 14)
-
-            actor_mix = self._c.imag_gradient_mix()
-
-            mix_actor_target = (
-                tf.transpose(_lambda_returns, [1, 0]) * actor_mix
-                + (1 - actor_mix) * actor_target
-            )
-            # print("mix_actor_target:", mix_actor_target)  # (2450, 14)
-
-            if not self._c.future_entropy and tf.greater(self._c.actor_entropy(), 0):
-                mix_actor_target += self._c.actor_entropy() * actor_ent[:, :-1]
-
-            if not self._c.future_entropy and tf.greater(
-                self._c.actor_state_entropy(), 0
-            ):
-                mix_actor_target += self._c.actor_state_entropy() * state_ent[:, :-1]
-
-            actor_loss = -tf.reduce_mean(weights * mix_actor_target)
 
         # actor_var = []
         # actor_var.extend(self.actor.trainable_variables)
@@ -1114,7 +1222,7 @@ class Dreamer:
             value_pred = self.critic(imag_feat, tf.float32)[:, :-1]
             # print("value_pred:",value_pred.mean().shape)
 
-            target = tf.stop_gradient(tf.transpose(_lambda_returns, [1, 0]))
+            target = tf.stop_gradient(tf.transpose(lambda_returns, [1, 0]))
 
             critic_loss = tf.reduce_mean(
                 weights * -value_pred.log_prob(target)
@@ -1136,6 +1244,8 @@ class Dreamer:
 
         self.update_step += 1
         tf.summary.experimental.set_step(self.update_step)
+
+        print("self.update_step:",self.update_step, "self._c.log_every:",self._c.log_every)
 
         if self.update_step % self._c.log_every == 0:
             print("update finish, save summary..., now update step:", self.update_step)

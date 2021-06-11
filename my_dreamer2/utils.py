@@ -12,7 +12,7 @@ import time
 from tensorflow.keras.mixed_precision import experimental as prec
 
 
-# @tf.function
+@tf.function
 def preprocess(episode_record, config):
     # print("preprocess episode_record:",episode_record.keys())
     dtype = prec.global_policy().compute_dtype
@@ -86,15 +86,9 @@ def load_episodes(directory, limit=None):
     total_step = 0
 
     for filename in reversed(sorted(directory.glob("*.npz"))):
-
         try:
             with filename.open("rb") as f:
-                # print("start loading!")
                 episode = np.load(f)
-                # episode = np.load(f,allow_pickle=True)
-
-                # print("finish loading!")
-
                 episode = {
                     k: episode[k] for k in episode.keys()
                 }  # dict_keys(['image', 'action', 'reward', 'discount'])
@@ -150,7 +144,6 @@ def load_dataset(episodes, config):  # load data from npz
     types = {k: v.dtype for k, v in example.items()}
 
     shapes = {k: (None,) + v.shape[1:] for k, v in example.items()}
-    # print("shapes:",shapes)
 
     generator = lambda: sample_episodes(
         episodes,

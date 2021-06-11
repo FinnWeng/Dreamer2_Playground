@@ -15,9 +15,6 @@ class Gym_Wrapper:
         sticky_actions=True,
         all_actions=False,
     ):
-
-        self.crop_size = (160, 160)
-        self.resize_size = (64, 64)
         self._actionRepeat = action_repeat
         self._observation = []
         # self.action_space = self._env.action_space
