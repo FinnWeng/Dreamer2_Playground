@@ -72,12 +72,10 @@ class Play:
             x, self._step
         )
         self.model = model_maker(self.env, training, self._step, self._writer, self._c)
-    
+
     def random_policy(self):
         action = self.random_actor.sample()
         return action
-
-
 
     def prefill_and_make_dataset(self):
         # since it casuse error when random choice zero object in self.load_dataset
@@ -85,9 +83,7 @@ class Play:
             self.datadir, limit=self._c.max_dataset_steps
         )
         while True:
-            self.collect(
-                must_be_whole_episode=True, prefill=True
-            )
+            self.collect(must_be_whole_episode=True, prefill=True)
             if self.total_step >= self._c.prefill:
                 self.reset_total_step()
                 break
@@ -127,6 +123,7 @@ class Play:
         discounts = []
 
         if advantage:
+            
 
             for TD_data in batch_data:
                 # TD_size,{4}
@@ -179,9 +176,7 @@ class Play:
 
             return np.array(obs), np.array(rewards), np.array(dones)
 
-    def collect(
-        self, must_be_whole_episode=True, prefill=False
-    ):
+    def collect(self, must_be_whole_episode=True, prefill=False):
         """
         collect end when the play_records full or episode end
         """
@@ -320,7 +315,7 @@ class Play:
                         # print("episode_record[0] doesn't have key ", key)
                         episode_record[0][key] = 0 * value
                         # print("Now it is:",episode_record[0][key])
-                
+
                 if not prefill:
                     # for dreamer, it need to reset state at end of every episode
                     if self.model.state is not None and np.array([done]).any():
@@ -346,16 +341,15 @@ class Play:
                 ):  # to deal with +1 causing not enough data of a TD size
                     print("reverse take for taking just to end of episode")
                     TD_data = episode_record[-self.TD_size :]
+                    import pdb
+                    pdb.set_trace()
                 self.play_records.append(TD_data)
                 # so the structure of self.play_records is:
                 # (batch_size* batch_length*TD_size or greater , TD_size)
-            
 
             tuple_of_episode_columns = self.TD_dict_to_TD_train_data(
                 self.play_records, True
             )  # for Dreamer, the TD = 1
-
-
 
             dict_of_episode_record = {
                 "obs": tuple_of_episode_columns[0],
@@ -365,8 +359,9 @@ class Play:
                 "dones": tuple_of_episode_columns[4],
                 "discounts": tuple_of_episode_columns[5],
             }
-            dict_of_episode_record = {k: self._convert(v) for k, v in dict_of_episode_record.items()}
-
+            dict_of_episode_record = {
+                k: self._convert(v) for k, v in dict_of_episode_record.items()
+            }
 
             # reset the inner buffer
             filename = utils.save_episode(self.datadir, dict_of_episode_record)
@@ -380,7 +375,7 @@ class Play:
             episode_record = []
             self.post_process_play_records()
             print("not enough data!!")
-    
+
     def _convert(self, value):
         value = np.array(value)
         if np.issubdtype(value.dtype, np.floating):
@@ -393,7 +388,6 @@ class Play:
             raise NotImplementedError(value.dtype)
         return value.astype(dtype)
 
-
     def post_process_play_records(self):
         self.play_records = []
 
@@ -402,14 +396,14 @@ class Play:
         length = len(episode["rewards"]) - 1
         score = float(episode["rewards"].astype(np.float64).sum())
         video = episode["obp1s"]
-
+        
         for key, ep in reversed(sorted(cache.items(), key=lambda x: x[0])):
 
             if total <= self._c.max_dataset_steps - length:
                 total += len(ep["rewards"]) - 1
             else:
                 del cache[key]
-        
+
         cache[str(episode_name)] = episode
 
         step = count_steps(self.datadir)
@@ -440,10 +434,10 @@ class Play:
             )  # control by model.total_step, record the env total step
 
             print("save train_policy!!!!")
-            tools.video_summary("train_policy", np.array(video[None]), step * self._c.action_repeat)
+            tools.video_summary(
+                "train_policy", np.array(video[None]), step * self._c.action_repeat
+            )
 
-
-        
         print("the episodes size now is:", total + length, "steps")
 
     # @tf.function

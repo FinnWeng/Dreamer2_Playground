@@ -41,7 +41,7 @@ def define_config():
     config.parallel = "none"
     config.action_repeat = 4
     config.time_limit = 108000
-    config.prefill = 5000
+    config.prefill = 500
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
@@ -152,9 +152,7 @@ if __name__ == "__main__":
         for single play record, since I adopt act repeat and TD method, so it contain repeat_time*TD_size frames
         """
         print("play_process.play_records:", len(play_process.play_records))
-        play_process.collect(
-            must_be_whole_episode=False, prefill=False
-        )
+        play_process.collect(must_be_whole_episode=False, prefill=False)
         print("play_process.play_records:", len(play_process.play_records))
         # mean_reward = play_process.dreaming_update()
         # print("rewards:", mean_reward)
