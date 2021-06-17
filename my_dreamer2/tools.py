@@ -55,7 +55,6 @@ def graph_summary(writer, fn, *args):
 
 
 def video_summary(name, video, step=None, fps=20):
-    # print("name:", name)
     # name = name if isinstance(name, str) else name.decode("utf-8")
     name = str(name)
     if np.issubdtype(video.dtype, np.floating):
@@ -66,12 +65,12 @@ def video_summary(name, video, step=None, fps=20):
         summary = tf1.Summary()
         image = tf1.Summary.Image(height=B * H, width=T * W, colorspace=C)
         image.encoded_image_string = encode_gif(frames, fps)
-        summary.value.add(tag=name + "/gif", image=image)
+        summary.value.add(tag=name, image=image)
         tf.summary.experimental.write_raw_pb(summary.SerializeToString(), step)
     except (IOError, OSError) as e:
         print("GIF summaries require ffmpeg in $PATH.", e)
         frames = video.transpose((0, 2, 1, 3, 4)).reshape((1, B * H, T * W, C))
-        tf.summary.image(name + "/grid", frames, step)
+        tf.summary.image(name, frames, step)
 
 
 def encode_gif(frames, fps):
@@ -168,6 +167,31 @@ class OneHotDist(tfd.OneHotCategorical):
         return sample
 
 
+class DtypeDist:
+    def __init__(self, dist, dtype=None):
+        self._dist = dist
+        self._dtype = dtype or prec.global_policy().compute_dtype
+
+    @property
+    def name(self):
+        return "DtypeDist"
+
+    def __getattr__(self, name):
+        return getattr(self._dist, name)
+
+    def mean(self):
+        return tf.cast(self._dist.mean(), self._dtype)
+
+    def mode(self):
+        return tf.cast(self._dist.mode(), self._dtype)
+
+    def entropy(self):
+        return tf.cast(self._dist.entropy(), self._dtype)
+
+    def sample(self, *args, **kwargs):
+        return tf.cast(self._dist.sample(*args, **kwargs), self._dtype)
+
+
 def schedule(string, step):
     try:
         return float(string)
@@ -201,18 +225,24 @@ def count_steps(folder):
 
 
 def static_scan(fn, inputs, start, reverse=False):
+    # print("inputs:", inputs[0].shape)
     last = start
     outputs = [[] for _ in tf.nest.flatten(start)]
+
     indices = range(len(tf.nest.flatten(inputs)[0]))
     if reverse:
         indices = reversed(indices)
     for index in indices:
+
         inp = tf.nest.map_structure(lambda x: x[index], inputs)
+        # inp: action, embd
 
         last = fn(last, inp)
+        # print(last[0]["stoch"])
         [o.append(l) for o, l in zip(outputs, tf.nest.flatten(last))]
     if reverse:
         outputs = [list(reversed(x)) for x in outputs]
+    
     outputs = [tf.stack(x, 0) for x in outputs]
     return tf.nest.pack_sequence_as(start, outputs)
     # inputs = reward + pcont * next_values * (1 - lambda_)
@@ -248,12 +278,30 @@ class Optimizer(tf.Module):
             "sgd": lambda: tf.optimizers.SGD(lr),
             "momentum": lambda: tf.optimizers.SGD(lr, 0.9),
         }[opt]()
+        self._mixed = prec.global_policy().compute_dtype == tf.float16
+        if self._mixed:
+            self._opt = prec.LossScaleOptimizer(self._opt, "dynamic")
 
     def __call__(self, tape, loss, modules):
+        assert loss.dtype is tf.float32, self._name
         modules = modules if hasattr(modules, "__len__") else (modules,)
         varibs = tf.nest.flatten([module.variables for module in modules])
+        # count = sum(np.prod(x.shape) for x in varibs)
+        # print(f"Found {count} {self._name} parameters.")
+        assert len(loss.shape) == 0, loss.shape
+        tf.debugging.check_numerics(loss, self._name + "_loss")
+        metrics = {}
+        metrics[f"{self._name}_loss"] = loss
+
+        if self._mixed:
+            with tape:
+                loss = self._opt.get_scaled_loss(loss)
         grads = tape.gradient(loss, varibs)
+        if self._mixed:
+            grads = self._opt.get_unscaled_gradients(grads)
         norm = tf.linalg.global_norm(grads)
+        if not self._mixed:
+            tf.debugging.check_numerics(norm, self._name + "_norm")
         if self._clip:
             grads, _ = tf.clip_by_global_norm(grads, self._clip, norm)
 
@@ -261,14 +309,27 @@ class Optimizer(tf.Module):
             self._apply_weight_decay(varibs)
 
         self._opt.apply_gradients(zip(grads, varibs))
+        metrics[f"{self._name}_grad_norm"] = norm
+        if self._mixed:
+            try:
+                metrics[f"{self._name}_loss_scale"] = float(self._opt.loss_scale)
+            except TypeError:
+                metrics[f"{self._name}_loss_scale"] = float(
+                    self._opt.loss_scale._current_loss_scale
+                )
+        return metrics
 
     def _apply_weight_decay(self, varibs):
+        """
+        The self._wd_pattern is trivial, so actually it doesn't apply any weight decay
+        """
         nontrivial = self._wd_pattern != r".*"
         if nontrivial:
-            # print("Applied weight decay to variables:")
-            pass
+            print("Applied weight decay to variables:")
+
         for var in varibs:
-            # # if re.search(self._wd_pattern, self._name + '/' + var.name):
-            # if nontrivial:
-            #     print("- " + self._name + "/" + var.name)
-            var.assign((1 - self._wd) * var)
+            if re.search(self._wd_pattern, self._name + "/" + var.name):
+                if nontrivial:
+                    print("- " + self._name + "/" + var.name)
+                var.assign((1 - self._wd) * var)
+

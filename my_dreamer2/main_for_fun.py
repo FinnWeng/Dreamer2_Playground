@@ -65,7 +65,6 @@ def define_config():
     config.value_lr = 8e-5
     config.actor_lr = 8e-5
     config.grad_clip = 100.0
-    config.dataset_balance = False
     # Behavior.
     config.discount = 0.99
     config.disclam = 0.95

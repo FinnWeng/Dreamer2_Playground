@@ -9,17 +9,15 @@ import tensorflow as tf
 import os
 import time
 
-# from tensorflow.keras.mixed_precision import experimental as prec
+from tensorflow.keras.mixed_precision import experimental as prec
 
 
 @tf.function
 def preprocess(episode_record, config):
     # print("preprocess episode_record:",episode_record.keys())
-    # dtype = prec.global_policy().compute_dtype
-    episode_record = (
-        episode_record.copy()
-    )  # when used in policy(), do this to avoid the effect of data to save.
-    dtype = tf.float32
+    dtype = prec.global_policy().compute_dtype
+
+    episode_record = episode_record.copy()# when used in policy(), do this to avoid the effect of data to save.
     with tf.device("cpu:0"):
         episode_record["obs"] = tf.cast(episode_record["obs"], dtype) / 255.0 - 0.5
         episode_record["obp1s"] = tf.cast(episode_record["obp1s"], dtype) / 255.0 - 0.5
@@ -31,6 +29,10 @@ def preprocess(episode_record, config):
         # ]  # default none
         # episode_record["rewards"] = clip_rewards(episode_record["rewards"])
         episode_record["discounts"] *= config.discount
+
+    for key, value in episode_record.items():
+        if tf.dtypes.as_dtype(value.dtype) in (tf.float16, tf.float32, tf.float64):
+            episode_record[key] = tf.cast(value, dtype)
     return episode_record
 
 
@@ -82,15 +84,9 @@ def load_episodes(directory, limit=None):
     total_step = 0
 
     for filename in reversed(sorted(directory.glob("*.npz"))):
-
         try:
             with filename.open("rb") as f:
-                # print("start loading!")
                 episode = np.load(f)
-                # episode = np.load(f,allow_pickle=True)
-
-                # print("finish loading!")
-
                 episode = {
                     k: episode[k] for k in episode.keys()
                 }  # dict_keys(['image', 'action', 'reward', 'discount'])
@@ -146,7 +142,6 @@ def load_dataset(episodes, config):  # load data from npz
     types = {k: v.dtype for k, v in example.items()}
 
     shapes = {k: (None,) + v.shape[1:] for k, v in example.items()}
-    # print("shapes:",shapes)
 
     generator = lambda: sample_episodes(
         episodes,
