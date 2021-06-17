@@ -41,7 +41,7 @@ def define_config():
     config.parallel = "none"
     config.action_repeat = 4
     config.time_limit = 108000
-    config.prefill = 500
+    config.prefill = 50000
     config.eval_noise = 0.0
     config.clip_rewards = "tanh"
     # Model.
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     # self._dataset = iter(self.load_dataset(self.datadir, self._c))
     gpus = tf.config.experimental.list_physical_devices("GPU")
 
-    tf.config.experimental.set_visible_devices(gpus[1], "GPU")
+    tf.config.experimental.set_visible_devices(gpus[0], "GPU")
     if gpus:
         # Currently, memory growth needs to be the same across GPUs
         for gpu in gpus:
@@ -144,7 +144,7 @@ if __name__ == "__main__":
         all_actions=True,
     )
 
-    play_process = dreamer_play.Play(train_wrapped_gym, Dreamer, config)
+    play_process = dreamer_play.Play(train_wrapped_gym, Dreamer, config, mode)
 
     while True:
         """

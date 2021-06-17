@@ -17,9 +17,7 @@ def preprocess(episode_record, config):
     # print("preprocess episode_record:",episode_record.keys())
     dtype = prec.global_policy().compute_dtype
 
-    episode_record = (
-        episode_record.copy()
-    )  # when used in policy(), do this to avoid the effect of data to save.
+    episode_record = episode_record.copy()# when used in policy(), do this to avoid the effect of data to save.
     with tf.device("cpu:0"):
         episode_record["obs"] = tf.cast(episode_record["obs"], dtype) / 255.0 - 0.5
         episode_record["obp1s"] = tf.cast(episode_record["obp1s"], dtype) / 255.0 - 0.5

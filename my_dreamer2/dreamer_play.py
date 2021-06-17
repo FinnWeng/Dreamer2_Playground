@@ -28,6 +28,7 @@ class Play:
         #     self.env._env.action_space.sample()
         # )  # whether it is discrete or not, 0 is proper
         self.ob = self.env.reset()
+        self.state = None
         acts = self.env.action_space
         self.random_actor = tools.OneHotDist(tf.zeros_like(acts.low)[None])
 
@@ -47,7 +48,7 @@ class Play:
         self.save_play_img = False
         self.RGB_array_list = []
         self.episode_reward = 0
-        self.episode_step = 1  # to avoid devide by zero
+        self.episode_step = 0  # to avoid devide by zero
         self.datadir = self._c.logdir / "episodes"
 
         self._writer = tf.summary.create_file_writer(
@@ -217,7 +218,7 @@ class Play:
                 # print('tuple_of_episode_columns[2]:',np.amin(obs_data["obp1s"]))
                 obs_data = {k: self._convert(v) for k, v in obs_data.items()}
 
-                act, self.model.state = self.model.policy(obs_data, training=True)
+                act, self.state = self.model.policy(obs_data, self.state, training=True)
 
                 # print('tuple_of_episode_columns[2](after):',np.amax(obs_data["obp1s"]))
                 # print('tuple_of_episode_columns[2](after):',np.amin(obs_data["obp1s"]))
@@ -271,7 +272,7 @@ class Play:
                 trainsaction["done"] = done
                 trainsaction["discount"] = np.array(1.0).astype(np.float32)
 
-            episode_record.append(trainsaction)
+            episode_record.append(trainsaction.copy())
             # print(
             #     "collecting_data!!:",
             #     self.episode_step,
@@ -288,7 +289,7 @@ class Play:
             # print("self.total_step:", self.total_step)
 
             if prefill == True:
-                self.episode_step = 1
+                self.episode_step = 0
                 # self.total_step = 1
 
             else:
@@ -305,9 +306,7 @@ class Play:
                 #     self.env._env.action_space.sample()
                 # )  # whether it is discrete or not, 0 is proper
                 self.ob = self.env.reset()
-                self.episode_step = 1
-
-                average_reward = self.episode_reward / self.episode_step
+                self.episode_step = 0
 
                 # to make first trasaction with zero action
                 for key, value in episode_record[1].items():
@@ -318,13 +317,13 @@ class Play:
 
                 if not prefill:
                     # for dreamer, it need to reset state at end of every episode
-                    if self.model.state is not None and np.array([done]).any():
+                    if self.state is not None and np.array([done]).any():
                         mask = tf.cast(1 - np.array([done]), self._float)[:, None]
-                        self.model.state = tf.nest.map_structure(
-                            lambda x: x * mask, self.model.state
+                        self.state = tf.nest.map_structure(
+                            lambda x: x * mask, self.state
                         )
                     else:
-                        self.model.reset()
+                        self.state = None
 
                 break
 

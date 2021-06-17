@@ -326,8 +326,10 @@ class Optimizer(tf.Module):
         nontrivial = self._wd_pattern != r".*"
         if nontrivial:
             print("Applied weight decay to variables:")
+
         for var in varibs:
             if re.search(self._wd_pattern, self._name + "/" + var.name):
                 if nontrivial:
                     print("- " + self._name + "/" + var.name)
                 var.assign((1 - self._wd) * var)
+

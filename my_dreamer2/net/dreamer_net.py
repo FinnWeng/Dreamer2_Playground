@@ -299,12 +299,14 @@ class RSSM(tf.keras.Model):
         self._deter_size = deter
         self._hidden_size = hidden
         self._discrete = discrete
-        if cell == "gru":
-            self._cell = tf.keras.layers.GRUCell(
-                self._deter_size
-            )  # # (output, next_state) = call(input, state)
-        elif cell == "gru_layer_norm":
-            self._cell = GRUCell(self._deter_size, norm=True)
+        # if cell == "gru":
+        #     self._cell = tf.keras.layers.GRUCell(
+        #         self._deter_size
+        #     )  # # (output, next_state) = call(input, state)
+        # elif cell == "gru_layer_norm":
+        #     self._cell = GRUCell(self._deter_size, norm=True)
+        
+        self._cell = GRUCell(self._deter_size, norm=True)
 
     def get(self, name, ctor, *args, **kwargs):
         # Create or get layer by name to avoid mentioning it in the constructor.
@@ -343,7 +345,7 @@ class RSSM(tf.keras.Model):
             dist = tools.DtypeDist(dist, dtype or state["logit_vector"].dtype)
         return dist
 
-    # @tf.function
+    @tf.function
     def img_step(self, prev_state, prev_action):
         """
         the basic step, run without obs. the one with obs bases on this function
@@ -381,6 +383,8 @@ class RSSM(tf.keras.Model):
         """
 
         stoch = self.get_dist({"logit_vector": logit_vector}).sample()
+        
+        
 
         # print("stoch:", stoch.shape)  # (25, 32 , _stoch_size), one hot vectors
 
@@ -394,7 +398,7 @@ class RSSM(tf.keras.Model):
         prior = {"logit_vector": logit_vector, "stoch": stoch, "deter": deter}
         return prior
 
-    # @tf.function
+    @tf.function
     def obs_step(self, prev_state, prev_action, embed):
         """
         p(st|st-1,at-1,ot)
@@ -428,7 +432,7 @@ class RSSM(tf.keras.Model):
         post = {"logit_vector": logit_vector, "stoch": stoch, "deter": prior["deter"]}
         return post, prior
 
-    # @tf.function
+    @tf.function
     def imagine(self, action, state=None):  # been used only for summary
         if state is None:
             state = self.initial(tf.shape(action)[0])
@@ -439,7 +443,7 @@ class RSSM(tf.keras.Model):
 
         return prior
 
-    # @tf.function
+    @tf.function
     def observe(self, embed, action, state=None):
         """
         using obs_step to acturely do observe since it need to do transpose
@@ -478,24 +482,28 @@ class RSSM(tf.keras.Model):
         return post, prior
 
     def kl_loss(self, post, prior, forward, balance, free, scale):
-
+        kld = tfd.kl_divergence
         sg = lambda x: tf.nest.map_structure(tf.stop_gradient, x)
+        dist = lambda x: self.get_dist(x, tf.float32)
 
-        prior_dist = self.get_dist(prior, tf.float32)
-        stop_prior_dist = self.get_dist(sg(prior), tf.float32)
-
-        post_dist = self.get_dist(post, tf.float32)
-        stop_post_dist = self.get_dist(sg(post), tf.float32)
+        # prior_dist = self.get_dist(prior, tf.float32)
+        # stop_prior_dist = self.get_dist(sg(prior), tf.float32)
+        # post_dist = self.get_dist(post, tf.float32)
+        # stop_post_dist = self.get_dist(sg(post), tf.float32)
 
         # div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
+
+        lhs, rhs, token = (prior, post, "True") if forward else (post, prior, "false")
 
         mix = balance if forward else (1 - balance)
         if balance == 0.5:
             value = tfd.kl_divergence(post_dist, prior_dist)
             loss = tf.reduce_mean(tf.maximum(value, free))
         else:
-            value_lhs = kl_value = tfd.kl_divergence(post_dist, stop_prior_dist)
-            value_rhs = tfd.kl_divergence(stop_post_dist, prior_dist)
+            # value_lhs = kl_value = tfd.kl_divergence(post_dist, stop_prior_dist)
+            # value_rhs = tfd.kl_divergence(stop_post_dist, prior_dist)
+            value_lhs = kl_value = kld(dist(lhs), dist(sg(rhs)))
+            value_rhs = kld(dist(sg(lhs)), dist(rhs))
             loss_lhs = tf.maximum(tf.reduce_mean(value_lhs), free)
             loss_rhs = tf.maximum(tf.reduce_mean(value_rhs), free)
             loss = mix * loss_lhs + (1 - mix) * loss_rhs
@@ -582,8 +590,6 @@ class Dreamer:
         )  # tf.Tensor([0. 0. 0. 0.], shape=(4,), dtype=float32)
         self.random_actor = tools.OneHotDist(tf.zeros_like(actspace.low)[None])
 
-        self.state = None
-
         self.world_optimizer = tools.Optimizer(
             "world",
             self._c.model_lr,
@@ -662,9 +668,6 @@ class Dreamer:
 
     # if not is_training:
 
-    def reset(self):
-        self.state = None
-
     def _exploration(self, action, training):
         amount = self._c.expl_amount if training else self._c.eval_noise
         if amount == 0:
@@ -678,15 +681,15 @@ class Dreamer:
             return tf.clip_by_value(tfd.Normal(action, amount).sample(), -1, 1)
         raise NotImplementedError(self._c.action_noise)
 
-    # @tf.function
-    def policy(self, obs, training=False):
+    @tf.function
+    def policy(self, obs, state ,training=False):
         # this combine the encoder and actor and get feat to get a totoal agent policy
-        if self.state is None:
+        if state is None:
             obs_len = len(obs["obp1s"])
             latent = self.dynamics.initial(obs_len)
             action = tf.zeros((obs_len, self._actdim), self._float)
         else:
-            latent, action = self.state
+            latent, action = state
 
         embed = self.encoder(utils.preprocess(obs, self._c)["obp1s"])
         latent, _ = self.dynamics.obs_step(
@@ -705,11 +708,6 @@ class Dreamer:
 
         state = (latent, action)
         return action, state
-
-    def random_policy(self):
-        action = self.random_actor.sample()
-
-        return action
 
     def imagine_ahead(self, start_state):
         """
@@ -1075,16 +1073,14 @@ class Dreamer:
         # world_grads = world_tape.gradient(world_loss, world_var)
         world_model_parts = [
             self.encoder,
-            self.decoder,
             self.dynamics,
+            self.decoder,
             self.reward_decoder,
             self._pcont,
         ]
         world_model_metrics = self.world_optimizer(
             world_tape, world_loss, world_model_parts
         )
-        # print("self.reward_decoder.layers[0].variables:", self.reward_decoder.layers[0].variables)
-        # print("self._pcont_decoder.layers[0].variables:", self._pcont.layers[0].variables)
 
         self._update_slow_target()
 
@@ -1306,6 +1302,17 @@ class Dreamer:
                 image_pred,
             )
         # print("self.dynamics:", self.dynamics.summary())
+
+        # all_model_parts = world_model_parts + actor_model_parts + critic_model_parts
+
+        # for one_model in all_model_parts:
+        #     print("one_model:",one_model.name)
+        #     one_model_layers = one_model.layers
+        #     for one_layer in one_model_layers:
+        #         print("one_layer.name:",one_layer.name)
+        #         # print("self.reward_decoder.layers[0].variables:", self.reward_decoder.layers[0].variables)
+        #         # print("self._pcont_decoder.layers[0].variables:", self._pcont.layers[0].variables)
+
 
     def _image_summaries(self, data, embed, image_pred):
         # print("data['obs']:", data["obs"].shape) #  (50, 10, 64, 64, 1)
