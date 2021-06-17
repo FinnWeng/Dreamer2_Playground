@@ -8,11 +8,11 @@ Author's implementation: https://github.com/danijar/dreamerv2 , it is more clear
 
 The clear ascending trend of reward of an episode shows ability of DreamerV2. It takes one day, by one agent and one enviroment, to achieve this performance.
 
-
-
+![alt text](https://github.com/FinnWeng/Dreamer2_Playground/blob/float16_latent/common/actor_reward.PNG "Actor Loss result")
 
 Here shows an episode of Atari Breakout playing.
 
+![alt text](https://github.com/FinnWeng/Dreamer2_Playground/blob/float16_latent/common/video.gif "DreamerV2 result")
 
 
 # explain what I understand about DreamerV2
