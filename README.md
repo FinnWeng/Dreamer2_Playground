@@ -12,9 +12,7 @@ The clear ascending trend of reward of an episode shows ability of DreamerV2. It
 
 Here shows an episode of Atari Breakout playing.
 
-![alt text](https://github.com/FinnWeng/Dreamer2_Playground/blob/float16_latent/common/video.gif "DreamerV2 result")
-
-<a href="url"><img src="https://github.com/FinnWeng/Dreamer2_Playground/blob/float16_latent/common/video.gif" align="left" height="208" width="160" ></a>
+<a href="url"><img src="https://github.com/FinnWeng/Dreamer2_Playground/blob/float16_latent/common/video.gif" class="center" height="208" width="160" ></a>
 
 
 # explain what I understand about DreamerV2
