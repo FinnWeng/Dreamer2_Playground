@@ -28,7 +28,6 @@ class Play:
         #     self.env._env.action_space.sample()
         # )  # whether it is discrete or not, 0 is proper
         self.ob = self.env.reset()
-        self.state = None
         acts = self.env.action_space
         self.random_actor = tools.OneHotDist(tf.zeros_like(acts.low)[None])
 
@@ -218,7 +217,7 @@ class Play:
                 # print('tuple_of_episode_columns[2]:',np.amin(obs_data["obp1s"]))
                 obs_data = {k: self._convert(v) for k, v in obs_data.items()}
 
-                act, self.state = self.model.policy(obs_data, self.state, training=True)
+                act, self.model.state = self.model.policy(obs_data, self.model.state, training=True)
 
                 # print('tuple_of_episode_columns[2](after):',np.amax(obs_data["obp1s"]))
                 # print('tuple_of_episode_columns[2](after):',np.amin(obs_data["obp1s"]))
@@ -317,13 +316,13 @@ class Play:
 
                 if not prefill:
                     # for dreamer, it need to reset state at end of every episode
-                    if self.state is not None and np.array([done]).any():
+                    if self.model.state is not None and np.array([done]).any():
                         mask = tf.cast(1 - np.array([done]), self._float)[:, None]
-                        self.state = tf.nest.map_structure(
-                            lambda x: x * mask, self.state
+                        self.model.state = tf.nest.map_structure(
+                            lambda x: x * mask, self.model.state
                         )
                     else:
-                        self.state = None
+                        self.model.reset()
 
                 break
 

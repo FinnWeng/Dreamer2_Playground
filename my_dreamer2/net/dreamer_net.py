@@ -590,6 +590,8 @@ class Dreamer:
         )  # tf.Tensor([0. 0. 0. 0.], shape=(4,), dtype=float32)
         self.random_actor = tools.OneHotDist(tf.zeros_like(actspace.low)[None])
 
+        self.state = None
+
         self.world_optimizer = tools.Optimizer(
             "world",
             self._c.model_lr,
@@ -667,6 +669,9 @@ class Dreamer:
         # self.Dreamer_actor_path = "./model/Dreamer_actor.ckpt"
 
     # if not is_training:
+
+    def reset(self):
+        self.state = None
 
     def _exploration(self, action, training):
         amount = self._c.expl_amount if training else self._c.eval_noise
